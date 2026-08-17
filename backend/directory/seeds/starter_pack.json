@@ -1,0 +1,452 @@
+[
+  {
+    "industry": "E-commerce",
+    "icon": "🛒",
+    "description": "Online sellers, marketplaces and D2C brands.",
+    "templates": [
+      {
+        "category": "Orders",
+        "name": "Daily order processing",
+        "description": "Morning routine to clear the previous day's orders.",
+        "priority": "high",
+        "frequency": "daily",
+        "tags": ["operations", "daily"],
+        "steps": [
+          {"title": "Download new orders from all marketplaces", "description": "Amazon, Flipkart, own website.", "offset_days": 0},
+          {"title": "Verify payment status and flag COD orders", "offset_days": 0},
+          {"title": "Generate picklist and hand to warehouse", "offset_days": 0},
+          {"title": "Print shipping labels and schedule pickup", "offset_days": 0},
+          {"title": "Update tracking numbers to customers", "offset_days": 0}
+        ]
+      },
+      {
+        "category": "Returns",
+        "name": "Return & refund handling",
+        "description": "Standard RTO/return workflow.",
+        "priority": "normal",
+        "frequency": "one_time",
+        "tags": ["support"],
+        "steps": [
+          {"title": "Receive returned parcel and photograph condition", "offset_days": 0},
+          {"title": "Quality-check the item against the return reason", "offset_days": 1},
+          {"title": "Restock or mark as damaged inventory", "offset_days": 1},
+          {"title": "Trigger refund and notify the customer", "offset_days": 2}
+        ]
+      },
+      {
+        "category": "Catalogue",
+        "name": "New product listing",
+        "priority": "normal",
+        "frequency": "one_time",
+        "tags": ["catalogue", "marketing"],
+        "steps": [
+          {"title": "Collect product specs and pricing", "offset_days": 0},
+          {"title": "Arrange product photography", "offset_days": 2},
+          {"title": "Write title, bullets and description with keywords", "offset_days": 3},
+          {"title": "Publish listing on each marketplace", "offset_days": 4},
+          {"title": "Verify live listing and set launch ad budget", "offset_days": 5}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Distributor",
+    "icon": "📦",
+    "description": "Wholesale distribution and stockists.",
+    "templates": [
+      {
+        "category": "Purchase",
+        "name": "Monthly stock replenishment",
+        "priority": "high",
+        "frequency": "monthly",
+        "tags": ["purchase", "inventory"],
+        "steps": [
+          {"title": "Pull last month's sales velocity report", "offset_days": 0},
+          {"title": "Identify fast movers and dead stock", "offset_days": 1},
+          {"title": "Raise purchase orders with vendors", "offset_days": 2},
+          {"title": "Confirm dispatch dates and payment terms", "offset_days": 3},
+          {"title": "Update expected-arrival calendar", "offset_days": 4}
+        ]
+      },
+      {
+        "category": "Sales",
+        "name": "Retailer beat plan",
+        "priority": "normal",
+        "frequency": "weekly",
+        "tags": ["field-sales"],
+        "steps": [
+          {"title": "Prepare the week's route list for each salesman", "offset_days": 0},
+          {"title": "Share target sheet and scheme details", "offset_days": 0},
+          {"title": "Collect daily order sheets from the field", "offset_days": 3},
+          {"title": "Review coverage vs plan and log misses", "offset_days": 6}
+        ]
+      },
+      {
+        "category": "Accounts",
+        "name": "Outstanding collection drive",
+        "priority": "urgent",
+        "frequency": "weekly",
+        "tags": ["accounts", "collections"],
+        "steps": [
+          {"title": "Print ageing report (30/60/90 days)", "offset_days": 0},
+          {"title": "Call every account overdue beyond 60 days", "offset_days": 1},
+          {"title": "Send payment reminders on WhatsApp", "offset_days": 1},
+          {"title": "Escalate 90+ day accounts to management", "offset_days": 3}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Automotive & Spare Parts",
+    "icon": "🚗",
+    "description": "Workshops, spare-part traders and fleet services.",
+    "templates": [
+      {
+        "category": "Sales",
+        "name": "Spare-part enquiry to quotation",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["sales", "crm"],
+        "steps": [
+          {"title": "Confirm vehicle make, model and part numbers", "offset_days": 0},
+          {"title": "Check stock across warehouses", "offset_days": 0},
+          {"title": "Get vendor rates for out-of-stock items", "offset_days": 1},
+          {"title": "Send the quotation to the customer", "offset_days": 1},
+          {"title": "Follow up for confirmation", "offset_days": 3}
+        ]
+      },
+      {
+        "category": "Service",
+        "name": "Vehicle service job card",
+        "priority": "normal",
+        "frequency": "one_time",
+        "tags": ["workshop"],
+        "steps": [
+          {"title": "Open job card and record customer complaints", "offset_days": 0},
+          {"title": "Inspect vehicle and estimate parts + labour", "offset_days": 0},
+          {"title": "Get customer approval on the estimate", "offset_days": 0},
+          {"title": "Complete the work and quality-check", "offset_days": 1},
+          {"title": "Invoice, deliver and schedule the next service reminder", "offset_days": 2}
+        ]
+      },
+      {
+        "category": "Fleet",
+        "name": "Fleet AMC onboarding",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["b2b", "contract"],
+        "steps": [
+          {"title": "Collect fleet list with registration numbers", "offset_days": 0},
+          {"title": "Survey vehicle condition and service history", "offset_days": 2},
+          {"title": "Prepare AMC pricing and SLA document", "offset_days": 4},
+          {"title": "Sign contract and set service calendar", "offset_days": 7}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Garment Manufacturing",
+    "icon": "🧵",
+    "description": "Apparel units, exporters and job workers.",
+    "templates": [
+      {
+        "category": "Production",
+        "name": "New style production run",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["production"],
+        "steps": [
+          {"title": "Approve sample and finalise tech pack", "offset_days": 0},
+          {"title": "Issue fabric and trims to cutting", "offset_days": 2},
+          {"title": "Run line setup and first-piece inspection", "offset_days": 4},
+          {"title": "Mid-line quality audit", "offset_days": 7},
+          {"title": "Finishing, packing and dispatch clearance", "offset_days": 12}
+        ]
+      },
+      {
+        "category": "Quality",
+        "name": "Pre-dispatch inspection",
+        "priority": "urgent",
+        "frequency": "one_time",
+        "tags": ["quality", "export"],
+        "steps": [
+          {"title": "Pull AQL sample from packed cartons", "offset_days": 0},
+          {"title": "Check measurements against the spec sheet", "offset_days": 0},
+          {"title": "Verify labels, tags and barcodes", "offset_days": 0},
+          {"title": "Sign inspection report or raise rework", "offset_days": 1}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Construction",
+    "icon": "🏗️",
+    "description": "Contractors, builders and infrastructure firms.",
+    "templates": [
+      {
+        "category": "Site",
+        "name": "Weekly site progress review",
+        "priority": "high",
+        "frequency": "weekly",
+        "tags": ["site", "review"],
+        "steps": [
+          {"title": "Collect daily progress reports from site engineers", "offset_days": 0},
+          {"title": "Compare progress against the schedule", "offset_days": 1},
+          {"title": "Check material stock and raise indents", "offset_days": 1},
+          {"title": "Review safety incidents and compliance", "offset_days": 2},
+          {"title": "Circulate the weekly report to the client", "offset_days": 3}
+        ]
+      },
+      {
+        "category": "Procurement",
+        "name": "Material indent to delivery",
+        "priority": "normal",
+        "frequency": "one_time",
+        "tags": ["purchase"],
+        "steps": [
+          {"title": "Receive indent from the site engineer", "offset_days": 0},
+          {"title": "Float enquiry to three vendors", "offset_days": 1},
+          {"title": "Compare quotes and negotiate", "offset_days": 3},
+          {"title": "Release purchase order", "offset_days": 4},
+          {"title": "Verify delivery challan and quantity at site", "offset_days": 8}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Education & EdTech",
+    "icon": "🎓",
+    "description": "Schools, coaching institutes and online academies.",
+    "templates": [
+      {
+        "category": "Admissions",
+        "name": "Admission enquiry follow-up",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["admissions", "crm"],
+        "steps": [
+          {"title": "Log enquiry with course interest and budget", "offset_days": 0},
+          {"title": "Share brochure and fee structure", "offset_days": 0},
+          {"title": "Invite for a counselling session or demo class", "offset_days": 2},
+          {"title": "Follow up after the demo", "offset_days": 4},
+          {"title": "Close admission and collect documents", "offset_days": 7}
+        ]
+      },
+      {
+        "category": "Academics",
+        "name": "New batch launch",
+        "priority": "normal",
+        "frequency": "one_time",
+        "tags": ["academics"],
+        "steps": [
+          {"title": "Finalise timetable and faculty allocation", "offset_days": 0},
+          {"title": "Prepare study material and share access", "offset_days": 3},
+          {"title": "Run orientation session for students and parents", "offset_days": 5},
+          {"title": "Set the first assessment date", "offset_days": 10}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Financial Services",
+    "icon": "💰",
+    "description": "Loan agents, insurance advisors and investment firms.",
+    "templates": [
+      {
+        "category": "Loans",
+        "name": "Loan application processing",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["loans", "compliance"],
+        "steps": [
+          {"title": "Collect KYC and income documents", "offset_days": 0},
+          {"title": "Run credit-bureau check", "offset_days": 1},
+          {"title": "Prepare and submit the file to the lender", "offset_days": 2},
+          {"title": "Track sanction and clarify queries", "offset_days": 5},
+          {"title": "Coordinate disbursement and hand over documents", "offset_days": 9}
+        ]
+      },
+      {
+        "category": "Renewals",
+        "name": "Policy renewal drive",
+        "priority": "urgent",
+        "frequency": "monthly",
+        "tags": ["insurance", "retention"],
+        "steps": [
+          {"title": "Pull the list of policies expiring in 30 days", "offset_days": 0},
+          {"title": "Send renewal reminders on WhatsApp and email", "offset_days": 1},
+          {"title": "Call non-responders", "offset_days": 7},
+          {"title": "Record renewals and flag lapses for win-back", "offset_days": 25}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "CA Firm",
+    "icon": "📊",
+    "description": "Chartered accountants, tax and audit practices.",
+    "templates": [
+      {
+        "category": "GST",
+        "name": "Monthly GST filing",
+        "priority": "urgent",
+        "frequency": "monthly",
+        "tags": ["gst", "compliance"],
+        "steps": [
+          {"title": "Collect sales and purchase registers from the client", "offset_days": 0},
+          {"title": "Reconcile with GSTR-2B", "offset_days": 3},
+          {"title": "Share tax liability summary for approval", "offset_days": 5},
+          {"title": "File GSTR-1 and GSTR-3B", "offset_days": 8},
+          {"title": "Send the filed acknowledgement to the client", "offset_days": 9}
+        ]
+      },
+      {
+        "category": "Audit",
+        "name": "Statutory audit cycle",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["audit"],
+        "steps": [
+          {"title": "Send the audit requirement checklist", "offset_days": 0},
+          {"title": "Conduct opening meeting and plan scope", "offset_days": 5},
+          {"title": "Perform vouching and verification", "offset_days": 12},
+          {"title": "Draft observations and discuss with management", "offset_days": 25},
+          {"title": "Finalise and sign the audit report", "offset_days": 35}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Travel & Tourism",
+    "icon": "✈️",
+    "description": "Tour operators, travel agents and DMCs.",
+    "templates": [
+      {
+        "category": "Bookings",
+        "name": "Holiday package booking",
+        "priority": "normal",
+        "frequency": "one_time",
+        "tags": ["booking"],
+        "steps": [
+          {"title": "Understand travel dates, budget and group size", "offset_days": 0},
+          {"title": "Share 2-3 itinerary options with pricing", "offset_days": 1},
+          {"title": "Confirm itinerary and collect advance", "offset_days": 3},
+          {"title": "Book flights, hotels and transfers", "offset_days": 4},
+          {"title": "Share final vouchers and travel checklist", "offset_days": 7},
+          {"title": "Post-trip feedback call", "offset_days": 20}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Photography",
+    "icon": "📷",
+    "description": "Studios, wedding and commercial photographers.",
+    "templates": [
+      {
+        "category": "Events",
+        "name": "Wedding shoot delivery",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["shoot", "delivery"],
+        "steps": [
+          {"title": "Confirm shoot dates, venues and deliverables", "offset_days": 0},
+          {"title": "Assign crew and check equipment", "offset_days": 5},
+          {"title": "Back up raw footage on the same night", "offset_days": 10},
+          {"title": "Culling and first-cut editing", "offset_days": 20},
+          {"title": "Client review and revisions", "offset_days": 35},
+          {"title": "Deliver final album and files", "offset_days": 45}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Health & Wellness",
+    "icon": "🏥",
+    "description": "Clinics, gyms, salons and wellness centres.",
+    "templates": [
+      {
+        "category": "Patients",
+        "name": "New patient onboarding",
+        "priority": "normal",
+        "frequency": "one_time",
+        "tags": ["clinic"],
+        "steps": [
+          {"title": "Register patient details and medical history", "offset_days": 0},
+          {"title": "Schedule the consultation", "offset_days": 0},
+          {"title": "Share prescription and care instructions", "offset_days": 1},
+          {"title": "Follow-up call after treatment", "offset_days": 7}
+        ]
+      },
+      {
+        "category": "Retention",
+        "name": "Membership renewal reminder",
+        "priority": "normal",
+        "frequency": "monthly",
+        "tags": ["retention"],
+        "steps": [
+          {"title": "List memberships expiring this month", "offset_days": 0},
+          {"title": "Send renewal offer on WhatsApp", "offset_days": 2},
+          {"title": "Call members who haven't renewed", "offset_days": 10},
+          {"title": "Log feedback from non-renewals", "offset_days": 20}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Service Provider",
+    "icon": "🛠️",
+    "description": "Agencies, IT services and B2B service firms.",
+    "templates": [
+      {
+        "category": "Delivery",
+        "name": "New client onboarding",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["onboarding"],
+        "steps": [
+          {"title": "Send welcome email and collect requirements", "offset_days": 0},
+          {"title": "Kick-off call and scope confirmation", "offset_days": 2},
+          {"title": "Share project plan and milestones", "offset_days": 4},
+          {"title": "Set up access, tools and reporting cadence", "offset_days": 5},
+          {"title": "First milestone review", "offset_days": 15}
+        ]
+      },
+      {
+        "category": "Accounts",
+        "name": "Monthly retainer billing",
+        "priority": "high",
+        "frequency": "monthly",
+        "tags": ["billing"],
+        "steps": [
+          {"title": "Compile the month's work summary", "offset_days": 0},
+          {"title": "Raise invoice against the retainer", "offset_days": 1},
+          {"title": "Send invoice with the activity report", "offset_days": 2},
+          {"title": "Follow up on payment", "offset_days": 12}
+        ]
+      }
+    ]
+  },
+  {
+    "industry": "Hiring Agency",
+    "icon": "🤝",
+    "description": "Recruitment consultancies and staffing firms.",
+    "templates": [
+      {
+        "category": "Recruitment",
+        "name": "Position sourcing to offer",
+        "priority": "high",
+        "frequency": "one_time",
+        "tags": ["recruitment"],
+        "steps": [
+          {"title": "Take detailed JD and hiring brief from the client", "offset_days": 0},
+          {"title": "Source and screen candidate profiles", "offset_days": 3},
+          {"title": "Share shortlist with the client", "offset_days": 6},
+          {"title": "Coordinate interview rounds", "offset_days": 10},
+          {"title": "Negotiate offer and confirm joining date", "offset_days": 18},
+          {"title": "Follow up until the candidate joins", "offset_days": 30}
+        ]
+      }
+    ]
+  }
+]

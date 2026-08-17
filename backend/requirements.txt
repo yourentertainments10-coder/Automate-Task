@@ -1,0 +1,8 @@
+Django>=6.0
+djangorestframework>=3.16
+djangorestframework-simplejwt>=5.5
+django-cors-headers>=4.6
+python-dotenv>=1.0
+requests>=2.32
+# For Neon Postgres later (not needed for local SQLite):
+# psycopg[binary]>=3.2
