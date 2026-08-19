@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, errorText } from '../api'
+import { api, apiUpload, errorText } from '../api'
 import { useAuth } from '../auth'
+import { MySalary, PayrollAdmin } from './Payroll'
+import FaceCapture from './FaceCapture'
 
 const fmtT = (iso) => iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'
 const fmtD = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
@@ -17,8 +19,9 @@ export default function HR() {
   const [tab, setTab] = useState('today')
   const tabs = [
     ['today', 'Today'], ['history', 'My Attendance'], ['leave', 'My Leave'],
+    ['salary', 'My Salary'],
     ...(can('hr.approve') ? [['team', 'Team'], ['approvals', 'Approvals']] : []),
-    ...(can('hr.manage') ? [['settings', 'HR Settings']] : []),
+    ...(can('hr.manage') ? [['payroll', 'Payroll'], ['settings', 'HR Settings']] : []),
   ]
   return (
     <div>
@@ -31,6 +34,8 @@ export default function HR() {
       {tab === 'today' && <Today />}
       {tab === 'history' && <MyAttendance />}
       {tab === 'leave' && <MyLeave />}
+      {tab === 'salary' && <MySalary />}
+      {tab === 'payroll' && <PayrollAdmin />}
       {tab === 'team' && <TeamToday />}
       {tab === 'approvals' && <Approvals />}
       {tab === 'settings' && <HRSettings />}
@@ -45,6 +50,7 @@ function Today() {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [faceFor, setFaceFor] = useState(null)   // 'check_in' | 'check_out' while the camera is open
 
   const load = useCallback(() => {
     api('/api/attendance/today/').then(setData).catch(e => setErr(e.message))
@@ -60,17 +66,21 @@ function Today() {
     )
   })
 
-  const mark = async (which) => {
+  const send = async (which, faceDescriptor) => {
     setErr(''); setMsg(''); setBusy(true)
     try {
       const pos = await getPosition()
-      await api(`/api/attendance/${which}/`, { method: 'POST', body: pos })
+      const body = faceDescriptor ? { ...pos, face_descriptor: faceDescriptor } : pos
+      await api(`/api/attendance/${which}/`, { method: 'POST', body })
       setMsg(which === 'check_in' ? 'Checked in ✅' : 'Checked out ✅')
       load()
     } catch (e) {
       setErr(errorText(e.data) || e.message)
     } finally { setBusy(false) }
   }
+
+  // With face attendance switched on, the camera step comes first.
+  const mark = (which) => (data?.face_enabled ? setFaceFor(which) : send(which))
 
   if (err && !data) return <div className="err">{err}</div>
   if (!data) return <div className="center-note">Loading…</div>
@@ -98,17 +108,34 @@ function Today() {
             : ' Location check is off.'}
           {data.face_enabled && (data.face_enrolled
             ? ' Face verification is ON.'
-            : ' Face verification is ON but you are not enrolled — ask an admin.')}
+            : data.face_self_enroll
+              ? ' Face verification is ON — first time? Your face will be saved on your first check-in, just like setting up a phone face lock.'
+              : ' Face verification is ON but you are not enrolled — ask an admin.')}
         </p>
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn btn-primary" disabled={busy || !data.can_check_in}
             onClick={() => mark('check_in')}>
-            {busy ? 'Working…' : 'Check in'}
+            {busy ? 'Working…' : data.face_enabled ? '📷 Check in' : 'Check in'}
           </button>
           <button className="btn" disabled={busy || !data.can_check_out}
-            onClick={() => mark('check_out')}>Check out</button>
+            onClick={() => mark('check_out')}>
+            {data.face_enabled ? '📷 Check out' : 'Check out'}
+          </button>
         </div>
       </div>
+
+      {faceFor && (
+        <FaceCapture
+          title={faceFor === 'check_in' ? 'Check in with your face' : 'Check out with your face'}
+          action={faceFor === 'check_in' ? 'Check in' : 'Check out'}
+          hint={data.face_enrolled ? undefined
+            : data.face_self_enroll
+              ? 'First time: this capture becomes your face profile. Look straight at the camera in good light, without a mask.'
+              : 'Your face is not enrolled yet — ask an admin to enrol you first.'}
+          onClose={() => setFaceFor(null)}
+          onCapture={(descriptor) => { const w = faceFor; setFaceFor(null); send(w, descriptor) }}
+        />
+      )}
     </div>
   )
 }
@@ -122,6 +149,7 @@ function MyAttendance({ userId, userName }) {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [showCorrection, setShowCorrection] = useState(null)
+  const [selected, setSelected] = useState(null)   // the day opened from the calendar
 
   const load = useCallback(() => {
     const p = new URLSearchParams({ year, month })
@@ -130,6 +158,13 @@ function MyAttendance({ userId, userName }) {
   }, [year, month, userId])
   useEffect(() => { load() }, [load])
 
+  const shift = (delta) => {
+    let m = month + delta, y = year
+    if (m < 1) { m = 12; y -= 1 }
+    if (m > 12) { m = 1; y += 1 }
+    setMonth(m); setYear(y); setSelected(null)
+  }
+
   if (err) return <div className="err">{err}</div>
   if (!data) return <div className="center-note">Loading…</div>
   const t = data.totals
@@ -137,12 +172,14 @@ function MyAttendance({ userId, userName }) {
   return (
     <div style={{ maxWidth: 820 }}>
       <div className="filters">
-        <select value={month} onChange={e => setMonth(Number(e.target.value))}>
+        <button className="btn btn-sm" onClick={() => shift(-1)} aria-label="Previous month">‹</button>
+        <select value={month} onChange={e => { setMonth(Number(e.target.value)); setSelected(null) }}>
           {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
         </select>
-        <select value={year} onChange={e => setYear(Number(e.target.value))}>
+        <select value={year} onChange={e => { setYear(Number(e.target.value)); setSelected(null) }}>
           {[year - 1, year, year + 1].map(y => <option key={y} value={y}>{y}</option>)}
         </select>
+        <button className="btn btn-sm" onClick={() => shift(1)} aria-label="Next month">›</button>
         {userName && <span className="muted">· {userName}</span>}
         <span className="muted small" style={{ marginLeft: 'auto' }}>Total {data.total_hours} h</span>
       </div>
@@ -155,32 +192,34 @@ function MyAttendance({ userId, userName }) {
             </div>
           ))}
       </div>
-      <table className="table">
-        <thead><tr><th>Date</th><th>Status</th><th>In</th><th>Out</th><th>Worked</th><th>Flags</th>{!userId && <th />}</tr></thead>
-        <tbody>
-          {data.days.filter(d => d.status).map(d => (
-            <tr key={d.date}>
-              <td>{fmtD(d.date)}</td>
-              <td><span className={`q-pill q-${d.status}`}>{STATUS_LABEL[d.status]}{d.holiday ? `: ${d.holiday}` : ''}</span></td>
-              <td>{fmtT(d.check_in)}</td>
-              <td>{fmtT(d.check_out)}</td>
-              <td>{hrs(d.working_minutes)}</td>
-              <td className="small">
-                {d.is_late && <span className="prio prio-high">late</span>}{' '}
-                {d.is_early_checkout && <span className="ai-chip">early out</span>}{' '}
-                {d.missing_checkout && <span className="prio prio-urgent">no checkout</span>}
-              </td>
-              {!userId && (
-                <td className="row-actions">
-                  {['present', 'late', 'half_day', 'absent'].includes(d.status) && (
-                    <button className="btn btn-sm" onClick={() => setShowCorrection(d)}>Fix</button>
-                  )}
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <AttendanceCalendar
+        days={data.days} year={year} month={month}
+        selected={selected} onSelect={d => setSelected(selected?.date === d.date ? null : d)}
+      />
+      {selected && (
+        <div className="dash-card" style={{ marginTop: 12 }}>
+          <h3>{new Date(selected.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {' '}<span className={`q-pill q-${selected.status}`}>{STATUS_LABEL[selected.status]}{selected.holiday ? `: ${selected.holiday}` : ''}</span>
+          </h3>
+          <div className="doc-row"><span>Check in</span><strong>{fmtT(selected.check_in)}</strong></div>
+          <div className="doc-row"><span>Check out</span><strong>{fmtT(selected.check_out)}</strong></div>
+          <div className="doc-row"><span>Worked</span><strong>{hrs(selected.working_minutes)}</strong></div>
+          {(selected.is_late || selected.is_early_checkout || selected.missing_checkout) && (
+            <div className="doc-row"><span>Flags</span>
+              <span>
+                {selected.is_late && <span className="prio prio-high">late</span>}{' '}
+                {selected.is_early_checkout && <span className="ai-chip">early out</span>}{' '}
+                {selected.missing_checkout && <span className="prio prio-urgent">no checkout</span>}
+              </span>
+            </div>
+          )}
+          {!userId && ['present', 'late', 'half_day', 'absent'].includes(selected.status) && (
+            <button className="btn" style={{ marginTop: 10 }} onClick={() => setShowCorrection(selected)}>
+              Request a correction for this day
+            </button>
+          )}
+        </div>
+      )}
       {showCorrection && (
         <CorrectionModal day={showCorrection} onClose={() => setShowCorrection(null)}
           onSaved={() => { setShowCorrection(null); load() }} />
@@ -307,7 +346,6 @@ function ApplyModal({ types, onClose, onSaved }) {
         const fd = new FormData()
         Object.entries(f).forEach(([k, v]) => fd.append(k, v))
         fd.append('document', doc)
-        const { apiUpload } = await import('../api')
         await apiUpload('/api/leaves/', fd)
       } else {
         await api('/api/leaves/', { method: 'POST', body: f })
@@ -352,13 +390,31 @@ function ApplyModal({ types, onClose, onSaved }) {
 /* ---------------- Team today ---------------- */
 
 function TeamToday() {
+  const { can } = useAuth()
+  const canManage = can('hr.manage')
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
   const [viewUser, setViewUser] = useState(null)
-  useEffect(() => {
+  const load = useCallback(() => {
     api('/api/attendance/team_today/').then(setData).catch(e => setErr(e.message))
   }, [])
-  if (err) return <div className="err">{err}</div>
+  useEffect(() => { load() }, [load])
+
+  const markPresent = async (row) => {
+    setErr(''); setMsg('')
+    const reason = window.prompt(`Mark ${row.name} present — reason? (e.g. face lock not working)`, 'face lock not working')
+    if (reason === null) return
+    try {
+      await api('/api/attendance/manual_mark/', {
+        method: 'POST',
+        body: { user: row.user_id, status: 'present', reason },
+      })
+      setMsg(`${row.name} marked present ✅`)
+      load()
+    } catch (e) { setErr(errorText(e.data) || e.message) }
+  }
+  if (err && !data) return <div className="err">{err}</div>
   if (!data) return <div className="center-note">Loading…</div>
   if (viewUser) return (
     <div>
@@ -379,6 +435,8 @@ function TeamToday() {
             </div>
           ))}
       </div>
+      {err && <div className="err">{err}</div>}
+      {msg && <div className="placeholder-card" style={{ marginTop: 0, marginBottom: 10 }}><h3>{msg}</h3></div>}
       <table className="table">
         <thead><tr><th>Employee</th><th>Department</th><th>Status</th><th>In</th><th>Out</th><th>Worked</th><th /></tr></thead>
         <tbody>
@@ -390,7 +448,12 @@ function TeamToday() {
               <td>{fmtT(r.check_in)}</td>
               <td>{fmtT(r.check_out)}</td>
               <td>{hrs(r.working_minutes)}</td>
-              <td className="row-actions"><button className="btn btn-sm" onClick={() => setViewUser(r)}>History</button></td>
+              <td className="row-actions">
+                <button className="btn btn-sm" onClick={() => setViewUser(r)}>History</button>
+                {canManage && r.status !== 'present' && r.status !== 'late' && (
+                  <button className="btn btn-sm btn-primary" onClick={() => markPresent(r)}>Mark present</button>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -475,6 +538,7 @@ function HRSettings() {
   const [config, setConfig] = useState(null)
   const [offices, setOffices] = useState([])
   const [types, setTypes] = useState([])
+  const [team, setTeam] = useState([])
   const [office, setOffice] = useState({ name: '', latitude: '', longitude: '', radius_m: 200 })
   const [type, setType] = useState({ name: '', annual_quota: 12, paid: true, requires_document: false })
   const [err, setErr] = useState('')
@@ -483,6 +547,7 @@ function HRSettings() {
     Promise.all([api('/api/hr/config/'), api('/api/office-locations/'), api('/api/leave-types/')])
       .then(([c, o, t]) => { setConfig(c); setOffices(o); setTypes(t) })
       .catch(e => setErr(e.message))
+    api('/api/team/').then(setTeam).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -552,6 +617,8 @@ function HRSettings() {
         </div>
       </div>
 
+      <FaceEnrolment config={config} team={team} />
+
       <div className="dash-card">
         <h3>Leave types</h3>
         {types.map(t => (
@@ -566,6 +633,129 @@ function HRSettings() {
           <div><label className="switch" style={{ marginTop: 20 }}><input type="checkbox" checked={type.requires_document} onChange={e => setType(t => ({ ...t, requires_document: e.target.checked }))} /><span>Document required</span></label></div>
         </div>
         <button className="btn btn-primary" style={{ marginTop: 10 }} disabled={!type.name.trim()} onClick={addType}>Add leave type</button>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- Face enrolment (admin) ---------------- */
+
+function FaceEnrolment({ config, team }) {
+  const [target, setTarget] = useState('')
+  const [capturing, setCapturing] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+
+  const enrol = async (descriptor) => {
+    setErr(''); setMsg('')
+    try {
+      await api(`/api/hr/face/${target}/`, { method: 'POST', body: { descriptor } })
+      const name = team.find(t => String(t.id) === String(target))?.name || 'Employee'
+      setMsg(`${name} enrolled ✅ — they can now mark attendance with their face.`)
+      setTarget('')
+    } catch (e) { setErr(errorText(e.data) || e.message) }
+  }
+
+  const remove = async () => {
+    setErr(''); setMsg('')
+    try {
+      await api(`/api/hr/face/${target}/`, { method: 'DELETE' })
+      const name = team.find(t => String(t.id) === String(target))?.name || 'Employee'
+      setMsg(`${name}'s face profile removed.`)
+      setTarget('')
+    } catch (e) { setErr(errorText(e.data) || e.message) }
+  }
+
+  return (
+    <div className="dash-card" style={{ marginBottom: 14 }}>
+      <h3>Face attendance</h3>
+      <p className="muted small">
+        {config.face_enabled
+          ? 'Face verification is ON — employees must pass a face check to mark attendance.'
+          : 'Face verification is currently OFF. Enrol faces here, then set FACE_RECOGNITION_ENABLED=true in backend/.env and restart the API.'}
+      </p>
+      <p className="muted small">
+        Only a numeric signature of the face is stored — never a photo. You can remove
+        an employee&apos;s profile at any time.
+      </p>
+      {err && <div className="err">{err}</div>}
+      {msg && <div className="placeholder-card" style={{ marginTop: 0, marginBottom: 10 }}><h3>{msg}</h3></div>}
+      <div className="filters">
+        <select value={target} onChange={e => setTarget(e.target.value)}>
+          <option value="">Choose an employee…</option>
+          {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <button className="btn btn-primary" disabled={!target} onClick={() => setCapturing(true)}>
+          📷 Enrol face
+        </button>
+        <button className="btn" disabled={!target} onClick={remove}>Remove profile</button>
+      </div>
+      {capturing && (
+        <FaceCapture
+          title="Enrol employee face"
+          action="Save face"
+          hint="Ask the employee to look straight at the camera in good light."
+          onClose={() => setCapturing(false)}
+          onCapture={(d) => { setCapturing(false); enrol(d) }}
+        />
+      )}
+    </div>
+  )
+}
+
+/* ---------------- Calendar grid for My Attendance ---------------- */
+
+const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+function AttendanceCalendar({ days, year, month, selected, onSelect }) {
+  // Monday-first offset for the 1st of the month
+  const first = new Date(year, month - 1, 1)
+  const lead = (first.getDay() + 6) % 7          // JS: Sun=0 -> Mon-first index
+  const todayIso = (() => {
+    const d = new Date()
+    const pad = (x) => String(x).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  })()
+
+  return (
+    <div className="cal">
+      <div className="cal-head">
+        {DOW.map(d => <div key={d} className="cal-dow">{d}</div>)}
+      </div>
+      <div className="cal-grid">
+        {Array.from({ length: lead }, (_, i) => <div key={'x' + i} className="cal-cell empty" />)}
+        {days.map(d => {
+          const num = Number(d.date.slice(-2))
+          const clickable = !!d.status
+          return (
+            <button
+              key={d.date}
+              className={
+                'cal-cell st-' + (d.status || 'future')
+                + (selected?.date === d.date ? ' on' : '')
+                + (d.date === todayIso ? ' today' : '')
+              }
+              disabled={!clickable}
+              onClick={() => onSelect(d)}
+              title={d.status ? STATUS_LABEL[d.status] : ''}
+            >
+              <span className="cal-num">{num}</span>
+              {d.status && <span className="cal-tag">{
+                { present: '✓', late: 'L', half_day: '½', absent: '✗',
+                  leave: 'Lv', holiday: 'H', week_off: 'off' }[d.status]
+              }</span>}
+              {(d.is_late || d.missing_checkout) && <span className="cal-flag" />}
+            </button>
+          )
+        })}
+      </div>
+      <div className="cal-legend">
+        <span><i className="lg st-present" /> Present</span>
+        <span><i className="lg st-late" /> Late</span>
+        <span><i className="lg st-half_day" /> Half day</span>
+        <span><i className="lg st-absent" /> Absent</span>
+        <span><i className="lg st-leave" /> Leave</span>
+        <span><i className="lg st-week_off" /> Off/Holiday</span>
       </div>
     </div>
   )

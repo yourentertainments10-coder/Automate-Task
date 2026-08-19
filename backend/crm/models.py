@@ -145,6 +145,29 @@ class TaskStatus(models.TextChoices):
     DONE = "done", "Done"
 
 
+class TaskCategory(models.Model):
+    """Managed category list (reviewer's demand: dropdown, never free text).
+    department="" means the category is global — offered for every
+    department. Only managers/admin create categories."""
+    name = models.CharField(max_length=60)
+    department = models.CharField(max_length=20, choices=Department.choices,
+                                  blank=True, default="")
+    active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                   on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["department", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["department", "name"], name="uniq_dept_category"),
+        ]
+        verbose_name_plural = "task categories"
+
+    def __str__(self):
+        return f"{self.name}" + (f" ({self.get_department_display()})" if self.department else " (all)")
+
+
 class TaskFrequency(models.TextChoices):
     ONE_TIME = "one_time", "One time"
     DAILY = "daily", "Daily"
@@ -158,6 +181,9 @@ class Task(models.Model):
     recurring task auto-creates the next occurrence."""
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
+    # Department is picked first on the form; the category list filters by it
+    department = models.CharField(max_length=20, choices=Department.choices,
+                                  blank=True, default="")
     category = models.CharField(max_length=60, blank=True, default="")
     frequency = models.CharField(max_length=10, choices=TaskFrequency.choices, default=TaskFrequency.ONE_TIME)
     lead = models.ForeignKey(Lead, null=True, blank=True, on_delete=models.CASCADE, related_name="tasks")
@@ -171,6 +197,17 @@ class Task(models.Model):
     status = models.CharField(max_length=15, choices=TaskStatus.choices, default=TaskStatus.OPEN)
     priority = models.CharField(max_length=10, choices=LeadPriority.choices, default=LeadPriority.NORMAL)
     due_at = models.DateTimeField(null=True, blank=True)
+    # Recurrence stops after this date (teardown: Repeat -> End Date)
+    repeat_until = models.DateField(null=True, blank=True)
+    # Effort value in minutes -- set by the ASSIGNER ("I know how long it takes").
+    effort_minutes = models.PositiveIntegerField(null=True, blank=True)
+    # The assignee's one-time counter-estimate ("Amit says 1h, Bhavna says 4h").
+    # Never overwrites the assigner's value; both feed the review reports.
+    assignee_estimate_minutes = models.PositiveIntegerField(null=True, blank=True)
+    # Evidence captured when completing (Task Settings can make it mandatory)
+    completion_note = models.CharField(max_length=500, blank=True, default="")
+    # Soft delete: tasks land in the Deleted bin, recoverable by admin
+    deleted_at = models.DateTimeField(null=True, blank=True)
     reminded_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -187,8 +224,86 @@ class Task(models.Model):
     def is_overdue(self) -> bool:
         return bool(self.status != TaskStatus.DONE and self.due_at and self.due_at < timezone.now())
 
+    @property
+    def code(self) -> str:
+        return f"T-{self.pk:05d}"
+
     def __str__(self):
-        return f"{self.title} -> {self.assigned_to}"
+        return f"{self.code} {self.title} -> {self.assigned_to}"
+
+
+class ChangeRequestStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    APPROVED = "approved", "Approved"
+    REJECTED = "rejected", "Rejected"
+
+
+class TaskChangeRequest(models.Model):
+    """The in-system Modification Request. Nobody (except Admin) edits a task
+    directly any more -- a change is PROPOSED here and applied only on
+    approval, so scores can't be quietly manipulated.
+
+    Routing: raised by the assignee -> the task creator approves (or
+    ESCALATES it to admin); raised by the creator (their own mistake) -> an
+    Admin approves. Admin can always see and review everything."""
+    # set via the Escalate decision: the creator hands the call to admin
+    escalated = models.BooleanField(default=False)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="change_requests")
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                     related_name="task_change_requests")
+    # e.g. {"due_at": "...", "effort_minutes": 120, "frequency": "one_time",
+    #        "priority": "high", "title": "...", "cancel": true}
+    changes = models.JSONField(default=dict)
+    reason = models.TextField(max_length=1000)
+    status = models.CharField(max_length=10, choices=ChangeRequestStatus.choices,
+                              default=ChangeRequestStatus.PENDING)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                    on_delete=models.SET_NULL, related_name="reviewed_task_changes")
+    remarks = models.CharField(max_length=300, blank=True, default="")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status"])]
+
+    def __str__(self):
+        return f"Change request on {self.task_id} by {self.requested_by} [{self.status}]"
+
+
+def task_attachment_path(instance, filename):
+    return f"task_files/{instance.task_id}/{filename}"
+
+
+class TaskAttachment(models.Model):
+    """Files on a task -- including the proof-of-work demanded by Task
+    Settings when completing ("keeps ticking it daily" fix)."""
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="attachments")
+    file = models.FileField(upload_to=task_attachment_path)
+    filename = models.CharField(max_length=255)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class TaskSettings(models.Model):
+    """Org-wide task policies (singleton row, pk=1). The completion-evidence
+    switches mirror the reference app's 'Set Mandatory Fields'."""
+    require_completion_remarks = models.BooleanField(default=False)
+    require_completion_attachment = models.BooleanField(default=False)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                   on_delete=models.SET_NULL)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def get(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    class Meta:
+        verbose_name_plural = "task settings"
 
 
 class TaskActivity(models.Model):

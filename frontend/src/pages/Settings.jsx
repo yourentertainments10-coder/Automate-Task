@@ -9,17 +9,46 @@ const DEPARTMENTS = [
 export default function Settings() {
   const [rules, setRules] = useState([])
   const [team, setTeam] = useState([])
+  const [taskCfg, setTaskCfg] = useState(null)
   const [err, setErr] = useState('')
 
   const load = () => Promise.all([
     api('/api/assignment-rules/'),
     api('/api/leads/assignees/'),
-  ]).then(([r, t]) => { setRules(r.results || r); setTeam(t) }).catch(e => setErr(e.message))
+    api('/api/task-settings/'),
+  ]).then(([r, t, c]) => { setRules(r.results || r); setTeam(t); setTaskCfg(c) }).catch(e => setErr(e.message))
   useEffect(() => { load() }, [])
+
+  const setPolicy = async (key, value) => {
+    setErr('')
+    try { setTaskCfg(await api('/api/task-settings/', { method: 'POST', body: { [key]: value } })) }
+    catch (e) { setErr(errorText(e.data) || e.message) }
+  }
 
   return (
     <div>
       <div className="page-head"><h1>Automation Settings</h1></div>
+      {taskCfg && (
+        <div className="rule-card">
+          <div className="rule-head"><h3>Task completion evidence</h3></div>
+          <p className="muted small">
+            Force proof-of-work when someone completes a task — stops the
+            "just keeps ticking it daily" problem.
+          </p>
+          <div className="rule-members" style={{ gap: 18 }}>
+            <label className="switch">
+              <input type="checkbox" checked={taskCfg.require_completion_remarks}
+                onChange={e => setPolicy('require_completion_remarks', e.target.checked)} />
+              <span>Remarks required</span>
+            </label>
+            <label className="switch">
+              <input type="checkbox" checked={taskCfg.require_completion_attachment}
+                onChange={e => setPolicy('require_completion_attachment', e.target.checked)} />
+              <span>File / photo proof required</span>
+            </label>
+          </div>
+        </div>
+      )}
       <p className="muted" style={{ marginBottom: 16 }}>
         Auto-assignment rules: when a new lead arrives without an assignee (manual entry,
         or WhatsApp/Gmail/AI intake in Phase 3), the rule for its department picks the owner.

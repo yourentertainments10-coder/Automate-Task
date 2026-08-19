@@ -83,7 +83,7 @@ class GroupTests(Base):
         g = Group.objects.create(name="G", owner=self.manager)
         self.as_(self.rahul)
         res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.rahul.id,
-                                               "group": g.id})
+                                               "effort_minutes": 30, "group": g.id})
         self.assertEqual(res.status_code, 403)
 
     def test_group_dashboard_counts(self):

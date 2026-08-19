@@ -6,6 +6,7 @@ import { Bar } from 'react-chartjs-2'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
 import Directory from './Directory'
+import { ChangeRequests, CompleteModal, DeletedTasks, RequestChangeModal } from './TaskExtras'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
@@ -13,7 +14,28 @@ const ACCENT = '#0d7a5f'
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
   : null
+
+/* "6 hours from now" / "2 days overdue" — the teardown's relative due style */
+export const relDue = (iso) => {
+  if (!iso) return null
+  const diffMin = Math.round((new Date(iso) - Date.now()) / 60000)
+  const abs = Math.abs(diffMin)
+  const span = abs < 60 ? `${abs} min`
+    : abs < 60 * 24 ? `${Math.round(abs / 60)} hour${Math.round(abs / 60) === 1 ? '' : 's'}`
+    : `${Math.round(abs / (60 * 24))} day${Math.round(abs / (60 * 24)) === 1 ? '' : 's'}`
+  return diffMin >= 0 ? `${span} from now` : `${span} overdue`
+}
+
+export const fmtEffort = (min) => {
+  if (!min) return null
+  if (min < 60) return `${min}m`
+  return min % 60 === 0 ? `${min / 60}h` : `${Math.floor(min / 60)}h ${min % 60}m`
+}
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']]
+const DEPARTMENTS = [
+  ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
+  ['support', 'Customer Support'], ['hr', 'Human Resources'], ['management', 'Management'],
+]
 const FREQUENCIES = [['one_time', 'One time'], ['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']]
 const RANGES = [
   ['today', 'Today'], ['yesterday', 'Yesterday'], ['this_week', 'This Week'],
@@ -21,35 +43,50 @@ const RANGES = [
   ['this_year', 'This Year'], ['all', 'All Time'],
 ]
 
-const AREA_TABS = [
-  ['dashboard', 'Dashboard'], ['my', 'My Tasks'], ['delegated', 'Delegated'],
-  ['subscribed', 'Subscribed'], ['templates', 'Templates'],
-  ['directory', 'Template Directory'],
-  ['activities', 'Activities'], ['holidays', 'Holidays'],
-]
-
 export default function Tasks() {
+  const { can } = useAuth()
+  const isAdmin = can('tasks.view_all')
   const [area, setArea] = useState('dashboard')
   const [prefill, setPrefill] = useState(null)   // template -> open list with modal
+  const [inboxCount, setInboxCount] = useState(0)
+
+  const refreshInbox = useCallback(() => {
+    api('/api/task-change-requests/?scope=inbox&page_size=1')
+      .then(d => setInboxCount(d.count ?? (d.results || d).length))
+      .catch(() => {})
+  }, [])
+  useEffect(() => { refreshInbox() }, [refreshInbox])
 
   const useTemplate = (tpl) => { setPrefill(tpl); setArea('my') }
+
+  const tabs = [
+    ['dashboard', 'Dashboard'], ['my', 'My Tasks'], ['delegated', 'Delegated'],
+    ['subscribed', 'Subscribed'],
+    ['requests', inboxCount > 0 ? `Requests (${inboxCount})` : 'Requests'],
+    ['templates', 'Templates'], ['directory', 'Template Directory'],
+    ['activities', 'Activities'], ['holidays', 'Holidays'],
+    ...(isAdmin ? [['deleted', 'Deleted']] : []),
+  ]
 
   return (
     <div>
       <div className="page-head"><h1>Tasks</h1></div>
       <div className="area-tabs">
-        {AREA_TABS.map(([v, l]) => (
+        {tabs.map(([v, l]) => (
           <button key={v} className={'tab' + (area === v ? ' on' : '')} onClick={() => setArea(v)}>{l}</button>
         ))}
       </div>
       {area === 'dashboard' && <TaskDashboard />}
       {['my', 'delegated', 'subscribed'].includes(area) && (
-        <TaskList scope={area} key={area} prefill={prefill} clearPrefill={() => setPrefill(null)} />
+        <TaskList scope={area} key={area} prefill={prefill} clearPrefill={() => setPrefill(null)}
+          onRequestsChanged={refreshInbox} />
       )}
+      {area === 'requests' && <ChangeRequests isAdmin={isAdmin} onChanged={refreshInbox} />}
       {area === 'templates' && <Templates onUse={useTemplate} />}
       {area === 'directory' && <Directory />}
       {area === 'activities' && <Activities />}
       {area === 'holidays' && <Holidays />}
+      {area === 'deleted' && <DeletedTasks />}
     </div>
   )
 }
@@ -180,34 +217,56 @@ function TaskDashboard() {
 
 const STATUS_TABS = [['open,in_progress', 'Open'], ['done', 'Done'], ['', 'All']]
 
-function TaskList({ scope, prefill, clearPrefill }) {
-  const { user, can } = useAuth()
-  const canAssign = can('tasks.assign')
+function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
+  const { user } = useAuth()
   const [rows, setRows] = useState([])
-  const [team, setTeam] = useState([])
+  const [team, setTeam] = useState([])        // hierarchy-filtered: who I may assign to
   const [leads, setLeads] = useState([])
   const [groups, setGroups] = useState([])
+  const [settings, setSettings] = useState({})
   const [err, setErr] = useState('')
   const [tab, setTab] = useState('open,in_progress')
   const [onlyOverdue, setOnlyOverdue] = useState(false)
+  const [onlyRecurring, setOnlyRecurring] = useState(false)
   const [showAdd, setShowAdd] = useState(!!prefill)
+  const [completing, setCompleting] = useState(null)   // task in the evidence modal
+  const [requestFor, setRequestFor] = useState(null)   // task in the request-change modal
 
   const load = useCallback(() => {
     const p = new URLSearchParams({ page_size: '200', scope })
     if (tab) p.set('status', tab)
     if (onlyOverdue) p.set('overdue', 'true')
+    if (onlyRecurring) p.set('recurring', 'true')
     api(`/api/tasks/?${p}`).then(d => setRows(d.results || d)).catch(e => setErr(e.message))
-  }, [scope, tab, onlyOverdue])
+  }, [scope, tab, onlyOverdue, onlyRecurring])
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    if (canAssign) api('/api/leads/assignees/').then(setTeam).catch(() => {})
+    api('/api/tasks/assignees/').then(setTeam).catch(() => {})
     api('/api/leads/?page_size=300').then(d => setLeads(d.results || d)).catch(() => {})
     api('/api/groups/?active=true').then(setGroups).catch(() => {})
-  }, [canAssign])
+    api('/api/task-settings/').then(setSettings).catch(() => {})
+  }, [])
+
+  const needsEvidence = settings.require_completion_remarks || settings.require_completion_attachment
 
   const setStatus = async (t, status) => {
+    if (status === 'done' && needsEvidence) { setCompleting(t); return }
     setErr('')
     try { await api(`/api/tasks/${t.id}/`, { method: 'PATCH', body: { status } }); load() }
+    catch (e) {
+      const data = e.data || {}
+      if (data.needs) { setCompleting(t); return }   // server says evidence required
+      setErr(errorText(data) || e.message)
+    }
+  }
+
+  const giveEstimate = async (t) => {
+    const raw = window.prompt(
+      `Your estimate for "${t.title}" in MINUTES` +
+      (t.effort_minutes ? ` (assigner said ${fmtEffort(t.effort_minutes)})` : '') + ':')
+    if (!raw) return
+    setErr('')
+    try { await api(`/api/tasks/${t.id}/estimate/`, { method: 'POST', body: { minutes: Number(raw) } }); load() }
     catch (e) { setErr(errorText(e.data) || e.message) }
   }
 
@@ -236,6 +295,13 @@ function TaskList({ scope, prefill, clearPrefill }) {
         <button className={'chip' + (onlyOverdue ? ' on' : '')} onClick={() => setOnlyOverdue(v => !v)}>
           ⏰ Overdue only
         </button>
+        {scope === 'delegated' && (
+          <button className={'chip' + (onlyRecurring ? ' on-accent' : '')}
+            title="How many daily/weekly tasks have I assigned?"
+            onClick={() => setOnlyRecurring(v => !v)}>
+            ↻ Recurring only
+          </button>
+        )}
         <span style={{ flex: 1 }} />
         <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Task</button>
       </div>
@@ -248,32 +314,61 @@ function TaskList({ scope, prefill, clearPrefill }) {
           <div key={t.id} className={'task-row' + (t.is_overdue ? ' overdue' : '') + (t.status === 'done' ? ' done' : '')}>
             <input
               type="checkbox" checked={t.status === 'done'}
+              disabled={t.assigned_to !== user.id}
               onChange={e => setStatus(t, e.target.checked ? 'done' : 'open')}
-              title={t.status === 'done' ? 'Reopen' : 'Mark done'}
+              title={t.assigned_to !== user.id ? 'Only the assignee can complete this task'
+                : t.status === 'done' ? 'Reopen' : 'Mark done'}
             />
             <div className="task-main">
               <div className="task-title">
+                <span className="t-code">{t.code}</span>
                 {t.title}
                 {t.category && <span className="ai-chip">{t.category}</span>}
                 {t.group_name && <span className="ai-chip">👥 {t.group_name}</span>}
-                {t.frequency !== 'one_time' && <span className="ai-chip">↻ {t.frequency_display}</span>}
+                {t.frequency !== 'one_time' && (
+                  <span className="ai-chip">↻ {t.frequency_display}{t.repeat_until ? ` till ${fmtDT(t.repeat_until + 'T00:00:00')?.split(',')[0]}` : ''}</span>
+                )}
                 {t.priority !== 'normal' && <span className={`prio prio-${t.priority}`}>{t.priority_display}</span>}
+                {t.effort_minutes && <span className="ai-chip" title="Effort set by the assigner">⏱ {fmtEffort(t.effort_minutes)}</span>}
+                {t.assignee_estimate_minutes && (
+                  <span className="ai-chip est" title="Assignee's own estimate">
+                    est. {fmtEffort(t.assignee_estimate_minutes)}
+                  </span>
+                )}
+                {t.pending_change_requests > 0 && (
+                  <span className="prio prio-high" title="Pending change request">✎ {t.pending_change_requests}</span>
+                )}
               </div>
               {t.description && <div className="small muted">{t.description}</div>}
+              {t.completion_note && <div className="small muted">📝 {t.completion_note}</div>}
               <div className="when">
                 {t.assigned_to_detail?.name}
                 {scope !== 'my' && t.created_by_detail && <> · by {t.created_by_detail.name}</>}
                 {t.lead_name && <> · lead: <strong>{t.lead_name}</strong></>}
-                {t.due_at && <span className={t.is_overdue ? ' late' : ''}> · due {fmtDT(t.due_at)}</span>}
+                {t.due_at && t.status !== 'done' && (
+                  <span className={t.is_overdue ? ' late' : ''}> · {relDue(t.due_at)}</span>
+                )}
                 {t.completed_at && <> · done {fmtDT(t.completed_at)}</>}
               </div>
             </div>
+            {t.assigned_to === user.id && t.status !== 'done' && !t.assignee_estimate_minutes && (
+              <button className="btn btn-sm" title="Disagree with the effort? Record your own estimate."
+                onClick={() => giveEstimate(t)}>est.</button>
+            )}
+            {(t.assigned_to === user.id || t.created_by_detail?.id === user.id
+              || user.capabilities?.includes('tasks.view_all')) && t.status !== 'done' && (
+              <button className="btn btn-sm"
+                title={user.capabilities?.includes('tasks.view_all')
+                  ? 'Edit this task (admin — applies immediately)'
+                  : 'Propose a change (deadline, effort, recurrence…) for approval'}
+                onClick={() => setRequestFor(t)}>✎</button>
+            )}
             <button
               className={'bell' + (t.subscribed ? ' on' : '')}
               title={t.subscribed ? 'Unfollow' : 'Follow this task'}
               onClick={() => toggleSub(t)}
             >🔔</button>
-            {t.status !== 'done' && (
+            {t.status !== 'done' && t.assigned_to === user.id && (
               <select value={t.status} onChange={e => setStatus(t, e.target.value)}>
                 <option value="open">Open</option>
                 <option value="in_progress">In Progress</option>
@@ -284,9 +379,21 @@ function TaskList({ scope, prefill, clearPrefill }) {
         ))}
       </div>
 
+      {completing && (
+        <CompleteModal task={completing} settings={settings}
+          onClose={() => setCompleting(null)}
+          onDone={() => { setCompleting(null); load() }} />
+      )}
+      {requestFor && (
+        <RequestChangeModal task={requestFor} team={team} user={user}
+          isAdmin={user.capabilities?.includes('tasks.view_all')}
+          onClose={() => setRequestFor(null)}
+          onDone={() => { setRequestFor(null); load(); onRequestsChanged?.() }} />
+      )}
+
       {showAdd && (
         <TaskModal
-          user={user} canAssign={canAssign} team={team} leads={leads} groups={groups} template={prefill}
+          user={user} team={team} leads={leads} groups={groups} template={prefill}
           onClose={() => { setShowAdd(false); clearPrefill?.() }}
           onSaved={() => { setShowAdd(false); clearPrefill?.(); load() }}
         />
@@ -295,26 +402,67 @@ function TaskList({ scope, prefill, clearPrefill }) {
   )
 }
 
-function TaskModal({ user, canAssign, team, leads, groups = [], template, onClose, onSaved }) {
+function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved }) {
+  const { can } = useAuth()
+  const canAddCategory = can('tasks.assign')
   const [f, setF] = useState({
     title: template?.title || '', description: template?.description || '',
     category: template?.category || '', frequency: template?.frequency || 'one_time',
+    department: user.department === 'management' ? '' : (user.department || ''),
     assigned_to: String(user.id), lead: '', group: '',
-    priority: template?.priority || 'normal', due_at: '',
+    priority: template?.priority || 'normal', due_at: '', repeat_until: '',
+    effort: '', effort_unit: 'minutes',
   })
+  const [categories, setCategories] = useState([])
+  const [inLoop, setInLoop] = useState([])          // colleague ids kept in the loop
+  const [newCat, setNewCat] = useState(null)        // null = closed, '' = typing
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const set = k => e => setF(prev => ({ ...prev, [k]: e.target.value }))
 
+  // Department first, then its categories (global + department-specific)
+  useEffect(() => {
+    api(`/api/task-categories/?department=${encodeURIComponent(f.department)}`)
+      .then(rows => {
+        setCategories(rows)
+        setF(prev => rows.some(c => c.name === prev.category) || !prev.category
+          ? prev : { ...prev, category: '' })
+      })
+      .catch(() => setCategories([]))
+  }, [f.department])
+
+  const addCategory = async () => {
+    const name = (newCat || '').trim()
+    if (!name) return
+    try {
+      const cat = await api('/api/task-categories/', {
+        method: 'POST', body: { name, department: f.department },
+      })
+      setCategories(prev => [...prev.filter(c => c.id !== cat.id), cat])
+      setF(prev => ({ ...prev, category: cat.name }))
+      setNewCat(null)
+    } catch (ex) { setErr(errorText(ex.data) || ex.message) }
+  }
+
+  const toggleLoop = (id) =>
+    setInLoop(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+
   const submit = async (e) => {
     e.preventDefault()
     setErr(''); setBusy(true)
+    const effort = f.effort
+      ? Math.round(Number(f.effort) * (f.effort_unit === 'hours' ? 60 : 1))
+      : null
     const body = {
       title: f.title, description: f.description, category: f.category,
+      department: f.department,
       frequency: f.frequency, assigned_to: Number(f.assigned_to), priority: f.priority,
       lead: f.lead ? Number(f.lead) : null,
       group: f.group ? Number(f.group) : null,
       due_at: f.due_at ? new Date(f.due_at).toISOString() : null,
+      repeat_until: f.frequency !== 'one_time' && f.repeat_until ? f.repeat_until : null,
+      effort_minutes: effort,
+      in_loop: inLoop,
     }
     try { await api('/api/tasks/', { method: 'POST', body }); onSaved() }
     catch (ex) { setErr(errorText(ex.data) || ex.message) }
@@ -335,8 +483,38 @@ function TaskModal({ user, canAssign, team, leads, groups = [], template, onClos
             <input value={f.description} onChange={set('description')} />
           </div>
           <div>
+            <label>Department</label>
+            <select value={f.department} onChange={set('department')}>
+              <option value="">General (no department)</option>
+              {DEPARTMENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
             <label>Category</label>
-            <input value={f.category} onChange={set('category')} placeholder="e.g. Calls, Quotes" />
+            {newCat === null ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <select value={f.category} onChange={set('category')} style={{ flex: 1 }}>
+                  <option value="">— pick a category —</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}{c.department ? '' : ' (general)'}
+                    </option>
+                  ))}
+                </select>
+                {canAddCategory && (
+                  <button type="button" className="btn btn-sm" title="Add a new category"
+                    onClick={() => setNewCat('')}>+</button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input value={newCat} onChange={e => setNewCat(e.target.value)} autoFocus
+                  placeholder="New category name" style={{ flex: 1 }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCategory() } }} />
+                <button type="button" className="btn btn-sm btn-primary" onClick={addCategory}>Add</button>
+                <button type="button" className="btn btn-sm" onClick={() => setNewCat(null)}>✕</button>
+              </div>
+            )}
           </div>
           <div>
             <label>Frequency</label>
@@ -345,12 +523,21 @@ function TaskModal({ user, canAssign, team, leads, groups = [], template, onClos
             </select>
           </div>
           <div>
-            <label>Assign to</label>
-            {canAssign ? (
-              <select value={f.assigned_to} onChange={set('assigned_to')}>
-                {team.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            <label>Assign to (your level &amp; below)</label>
+            <select value={f.assigned_to} onChange={set('assigned_to')}>
+              {team.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Effort — how long should this take? *</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input type="number" min="1" value={f.effort} onChange={set('effort')}
+                required placeholder="required" style={{ flex: 1 }} />
+              <select value={f.effort_unit} onChange={set('effort_unit')} style={{ width: 90 }}>
+                <option value="minutes">min</option>
+                <option value="hours">hours</option>
               </select>
-            ) : <input value={user.first_name || user.username} disabled />}
+            </div>
           </div>
           <div>
             <label>Linked lead</label>
@@ -376,11 +563,32 @@ function TaskModal({ user, canAssign, team, leads, groups = [], template, onClos
             <label>Due {f.frequency !== 'one_time' && '(first occurrence)'}</label>
             <input type="datetime-local" value={f.due_at} onChange={set('due_at')} />
           </div>
+          {f.frequency !== 'one_time' && (
+            <div>
+              <label>Repeat until (optional)</label>
+              <input type="date" value={f.repeat_until} onChange={set('repeat_until')} />
+            </div>
+          )}
+          {team.filter(a => a.id !== user.id).length > 0 && (
+            <div className="wide">
+              <label>In the loop — colleagues who follow this task</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+                {team.filter(a => a.id !== user.id).map(a => (
+                  <label key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 'normal' }}>
+                    <input type="checkbox" checked={inLoop.includes(a.id)}
+                      onChange={() => toggleLoop(a.id)} />
+                    {a.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         {err && <div className="err">{err}</div>}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={busy || !f.title.trim()}>
+          <button type="submit" className="btn btn-primary"
+            disabled={busy || !f.title.trim() || !f.effort}>
             {busy ? 'Saving…' : 'Create task'}
           </button>
         </div>

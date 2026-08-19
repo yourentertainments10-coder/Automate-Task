@@ -4,8 +4,29 @@ from accounts.models import User
 
 from .models import (
     AssignmentRule, Holiday, Lead, LeadDocument, LeadEvent, Quotation,
-    Task, TaskActivity, TaskTemplate,
+    Task, TaskActivity, TaskAttachment, TaskCategory, TaskChangeRequest,
+    TaskSettings, TaskTemplate,
 )
+
+
+class TaskCategorySerializer(serializers.ModelSerializer):
+    department_display = serializers.CharField(source="get_department_display", read_only=True)
+
+    class Meta:
+        model = TaskCategory
+        fields = ["id", "name", "department", "department_display", "active"]
+        # active is toggled via DELETE (deactivate), never set on create --
+        # a form POST without the field must not save active=False
+        read_only_fields = ["active"]
+
+    def validate(self, attrs):
+        name = attrs.get("name", "").strip()
+        department = attrs.get("department", "")
+        if name and TaskCategory.objects.filter(
+                name__iexact=name, department=department, active=True).exists():
+            raise serializers.ValidationError({"name": "This category already exists."})
+        attrs["name"] = name
+        return attrs
 
 
 class UserBriefSerializer(serializers.ModelSerializer):
@@ -93,17 +114,28 @@ class TaskSerializer(serializers.ModelSerializer):
     is_overdue = serializers.BooleanField(read_only=True)
     subscribed = serializers.SerializerMethodField()
 
+    code = serializers.CharField(read_only=True)
+    pending_change_requests = serializers.SerializerMethodField()
+
     class Meta:
         model = Task
         fields = [
-            "id", "title", "description", "category", "frequency", "frequency_display",
-            "lead", "lead_name", "group", "group_name",
+            "id", "code", "title", "description", "category", "department",
+            "frequency", "frequency_display",
+            "repeat_until", "lead", "lead_name", "group", "group_name",
             "assigned_to", "assigned_to_detail", "created_by_detail",
             "status", "status_display", "priority", "priority_display",
-            "due_at", "is_overdue", "completed_at", "subscribed",
-            "created_at", "updated_at",
+            "due_at", "is_overdue", "effort_minutes", "assignee_estimate_minutes",
+            "completion_note", "completed_at", "deleted_at", "subscribed",
+            "pending_change_requests", "created_at", "updated_at",
         ]
-        read_only_fields = ["completed_at", "created_at", "updated_at"]
+        read_only_fields = ["assignee_estimate_minutes", "completion_note",
+                            "completed_at", "deleted_at", "created_at", "updated_at"]
+
+    def get_pending_change_requests(self, obj):
+        return sum(1 for r in obj.change_requests.all() if r.status == "pending") \
+            if hasattr(obj, "_prefetched_objects_cache") and "change_requests" in obj._prefetched_objects_cache \
+            else obj.change_requests.filter(status="pending").count()
 
     def get_subscribed(self, obj):
         request = self.context.get("request")
@@ -134,6 +166,62 @@ class HolidaySerializer(serializers.ModelSerializer):
     class Meta:
         model = Holiday
         fields = ["id", "name", "date"]
+
+
+class TaskAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by = UserBriefSerializer(read_only=True)
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskAttachment
+        fields = ["id", "filename", "url", "uploaded_by", "created_at"]
+
+    def get_url(self, obj):
+        return obj.file.url if obj.file else None
+
+
+# Which task fields a Modification Request may propose to change
+CHANGEABLE_TASK_FIELDS = {
+    "title", "description", "due_at", "effort_minutes", "priority",
+    "frequency", "repeat_until", "category", "assigned_to", "cancel",
+}
+
+
+class TaskChangeRequestSerializer(serializers.ModelSerializer):
+    requested_by = UserBriefSerializer(read_only=True)
+    reviewed_by = UserBriefSerializer(read_only=True)
+    task_code = serializers.CharField(source="task.code", read_only=True)
+    task_title = serializers.CharField(source="task.title", read_only=True)
+    task_assignee = serializers.CharField(source="task.assigned_to.username", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = TaskChangeRequest
+        fields = ["id", "task", "task_code", "task_title", "task_assignee",
+                  "requested_by", "changes", "reason", "status", "status_display",
+                  "escalated", "reviewed_by", "remarks", "reviewed_at", "created_at"]
+        read_only_fields = ["task", "status", "escalated", "remarks", "reviewed_at"]
+
+    def validate_changes(self, value):
+        if not isinstance(value, dict) or not value:
+            raise serializers.ValidationError("Propose at least one change.")
+        unknown = set(value) - CHANGEABLE_TASK_FIELDS
+        if unknown:
+            raise serializers.ValidationError(
+                f"These fields cannot be changed via a request: {sorted(unknown)}")
+        if "effort_minutes" in value and value["effort_minutes"] is not None:
+            try:
+                if int(value["effort_minutes"]) < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise serializers.ValidationError("effort_minutes must be a positive number.")
+        return value
+
+
+class TaskSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskSettings
+        fields = ["require_completion_remarks", "require_completion_attachment", "updated_at"]
 
 
 class AssignmentRuleSerializer(serializers.ModelSerializer):

@@ -33,7 +33,7 @@ export default function Login() {
           <span className="brand-mark">CT</span>
           <div>CarTrends <small>Internal CRM</small></div>
         </div>
-        <label>Username</label>
+        <label>Username or email</label>
         <input value={username} onChange={e => setUsername(e.target.value)} autoFocus autoComplete="username" />
         <label>Password</label>
         <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />

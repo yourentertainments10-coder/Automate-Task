@@ -6,7 +6,7 @@ project. External services (WhatsApp Cloud API, Gmail API, Claude API, Neon
 Postgres) are wired purely through environment variables and stay **OFF** until
 their own new credentials are added to `backend/.env`.
 
-**Status: core phases + workspace modules + Forms + Leave & Attendance + Template Directory complete, plus HR separation-of-duties. 187 backend API tests, all passing.**
+**Status: CRM, workspace modules, Forms, Leave & Attendance, Payroll and the Template Directory are complete. 206 backend API tests, all passing.**
 
 ---
 
@@ -39,6 +39,7 @@ their own new credentials are added to `backend/.env`.
 | **Notifications** | One `notify()` entry point fans out to: in-app feed (always) + Gmail + WhatsApp (once credentials exist). Every channel attempt (sent/skipped/error) is recorded per notification. Unread badge, mark-read/read-all. |
 | **Follow-up & task reminders** | Background ticker (every 5 min) + `manage.py send_reminders`. One ping per follow-up/due date; re-fires when the date is rescheduled. |
 | **AI intake** | WhatsApp Cloud API webhook + Gmail inbox poller → Claude classification (keyword fallback when no key) → match existing lead by phone/email or create new → auto-assign → notify. Admin simulator to test the real pipeline without live credentials. |
+| **Task Engine v2 (A+B)** | **Assignment hierarchy** — level-based, not department-based: Admin→anyone, Managers→managers+employees, Employees→fellow employees (cross-department fine, never upward); the assignee picker only offers allowed people. **Effort values** — the assigner sets effort (min/hr, optional); the assignee can record a one-time counter-estimate that never overwrites it (both logged for reviews). Task IDs (`T-00042`), relative due times ("6 hours from now"), recurrence end-dates. **Soft delete** — admin-only deletion moves tasks to a restorable Deleted bin. **Edit lockdown** — assignee: status only; creator: no direct edits; admin: full (logged). **Modification Requests** — in-system: assignee's request → creator approves; creator's own request → admin approves; every request/decision notified + logged to admin; approvable changes: due date, effort, priority, title, stop-recurrence, reassign, cancel. **Completion evidence** — admin toggles (Automation page) forcing remarks and/or a proof file on completion, collected by a modal and enforced server-side on every path. |
 | **Tasks** | 7-tab area: Dashboard (6 tiles, date ranges, My/Delegated/Group scopes, category table, bar chart), My Tasks, Delegated, Subscribed (follow via 🔔), Templates, Activities audit feed, Holidays calendar. Category + frequency; recurring tasks auto-create the next occurrence on completion. Lead-linked tasks write into the lead timeline. |
 | **Dashboard** | Tiles (total/new/active/won/lost/pipeline ₹/conversion %/pending follow-ups/overdue/assigned tasks/overdue tasks), leads-per-day chart, pipeline-by-stage bars, employee performance, lead-source performance, recent WhatsApp/Gmail feed, recent lead activity. Admin sees all; managers see their department automatically. |
 | **Groups** | Team mini-workspaces: owner + members, category, archive (never hard-delete). Each group has Dashboard (task tiles + recent activity), Tasks, Ideas, Links and Members tabs. Tasks carry an optional group; **group members see the group's tasks** even when not assignee. Managers/admin create; owner/admin manage members. |
@@ -46,6 +47,9 @@ their own new credentials are added to `backend/.env`.
 | **Links** | Shared bookmark manager: named collections ("Important Tools"), per-link description, group-scoped visibility, ★ favorites, search + filters. http/https-only URL validation. Anyone adds; edit/delete own (managers/admin any); managers manage collections. |
 | **Idea Board** | My / Shared / Group idea boards with votes, comments, categories and a review workflow (New → Under Review → Approved/Rejected → Implemented). Authors edit their own ideas; only managers/admin change status. Group ideas require membership. |
 | **Leave & Attendance** | **Attendance**: check-in/out with server-computed status (Present / Late / Half Day / Absent / Leave / Holiday / Week Off), working hours, late & early-checkout flags, missing-checkout detection, month view with per-status totals, correction requests with manager review that rewrites the day. **Leave**: types with annual quotas & document rules, apply with date range (working days only — skips holidays/week-offs), overlap guard, balances (quota/used/pending), cancel, manager approve/reject with remarks + notification; **approved leave writes LEAVE days into attendance** and blocks check-in. **Geo-fencing**: admin-defined office locations (lat/lng/radius); when `GEOFENCE_ENABLED=true` the server haversine-validates the GPS sent at check-in and rejects anything outside every fence. **Face recognition** (`FACE_RECOGNITION_ENABLED`): admin-only enrolment storing a numeric descriptor (never an image), euclidean matching against `FACE_MATCH_THRESHOLD`, and attendance is **never** marked on a below-threshold or unenrolled scan. |
+| **Mobile / installable app** | Below 820px the sidebar becomes a slide-in drawer behind a top app bar (page title + notification bell); grids collapse to one column, tables scroll on their own, modals become bottom sheets, kanban columns become swipeable, tap targets grow, and notched phones get safe-area padding. Installs to a phone home screen as a **PWA** (manifest, 192/512/maskable icons, iOS meta tags, quick-action shortcuts) and a service worker caches the app shell for instant opening — but **never `/api` or `/media`**, so business data is always live. The app needs a connection to do anything beyond opening. |
+| **Face attendance** | `@vladmandic/face-api` with the models served locally from `public/models` (no CDN). The library and its 6.8 MB of weights are a **lazy chunk** — downloaded only when someone opens the camera, so the main bundle stays ~460 KB. Camera modal with a mirrored preview and guide oval. **Self-enrolment** (`FACE_SELF_ENROLL`, on by default): like setting up a phone face lock, an unenrolled employee's first capture becomes their profile and marks their attendance in one step — HR/Admin get a "Face self-enrolled" notification and can **reset** any profile in HR Settings so the next capture re-enrols fresh. Admin enrolment also available (choose employee → capture → save). **HR override**: a "Mark present" button on the Team tab (`hr.manage`) records attendance manually with an audited note ("Marked present by Neha: face lock not working") for the day the camera refuses to cooperate. **Only a 128-number descriptor is sent — the photo never leaves the device.** Clear errors for denied permission, no camera, no face, more than one face; a different face is always rejected ("Face did not match"). No liveness detection yet (a printed photo is not detected) — mitigated by geofence + notifications, listed in TODO. |
+| **Payroll** | Salary structures with history (monthly gross, optional basic, PF %, professional tax, other deduction, effective-from — a new entry never overwrites the old, so old payslips stay explainable). Monthly payroll runs computed **from the recorded attendance**: working days = calendar − week-offs − holidays; payable = present + late + half-days(×0.5) + *paid* leave; the rest is LWP. Advances are recovered automatically and settled on finalise. Draft runs can be recalculated freely; finalising locks the month. Per-employee payslip breakdown, CSV export, and a **My Salary** tab where every employee sees their own finalised payslips only. Guardrails: PF is charged on *earned* basic, and a payslip can never go below zero. |
 | **Industry Template Directory** | A browsable library of ready-made task templates, kept **separate** from the company's own private Task Templates. Browse by industry (13 seeded: E-commerce, Distributor, Automotive & Spare Parts, Garment Manufacturing, Construction, Education, Financial Services, CA Firm, Travel, Photography, Health & Wellness, Service Provider, Hiring Agency) → category → template → preview its steps → **Create tasks** (steps become real tasks, spaced by `offset_days`, optionally assigned to a teammate or a group) or **Add to my Task Templates**. Content lives in JSON/CSV and loads via `manage.py load_directory` — never hand-written in code. |
 | **Forms** | Real form builder: 10 field types (short/long text, number, email, phone, date, dropdown, radio, checkbox, file), required toggle, options, reorder/edit/delete, draft → publish → disable → reopen. Filled in-app by employees AND by customers via an unauthenticated **share link** (`/f/<token>`). Server-side validation, submissions list with answers + files, **CSV export**. Integrations: a submission can auto-create a **Lead** (field→attribute mapping, source=web, routed by the *existing* `auto_assign()` round-robin) and/or a **follow-up Task** assigned to the lead's assignee — both notified through the existing notification center. |
 
@@ -166,6 +170,14 @@ LeaveRequest    user, leave_type, start_date, end_date, days, reason,
                 document?, status (pending|approved|rejected|cancelled),
                 reviewed_by, remarks, reviewed_at
 FaceProfile     user (1:1), descriptor JSON (numeric only), enrolled_by
+SalaryStructure user, monthly_gross, basic?, pf_percent, professional_tax,
+                other_deduction, effective_from  (unique per user+date)
+Advance         user, amount, given_on, reason, recovered, recovered_in
+PayrollRun      year+month (unique), status (draft|finalised), working_days,
+                total_net, finalised_at
+Payslip         run+user (unique), monthly_gross, working/payable/lwp days,
+                earned_gross, pf, professional_tax, advance_deduction,
+                other_deduction, net_payable, breakdown JSON
 Industry        name, slug, icon, description, order, active
 DirectoryTemplate industry, category, name, description, priority,
                 frequency, tags JSON, steps JSON [{title, description,
@@ -232,6 +244,19 @@ All under `/api/`, JWT `Authorization: Bearer <token>` unless noted.
 | `leave-types/` · `office-locations/` | CRUD | read: any · write: `hr.manage` | HR configuration |
 | `hr/face/{user_id}/` | POST/DELETE | `hr.manage` | face enrolment / removal (descriptor only) |
 | `hr/config/` | GET | any | policy + feature flags + own capabilities |
+| `salary-structures/` · `advances/` | CRUD | read own · write `hr.manage` | salary history, advances |
+| `payroll-runs/` + `/{id}/generate\|finalise/` | CRUD + POST | `hr.manage` | monthly run; recalculate; lock + settle advances |
+| `payroll-runs/{id}/payslips\|export/` | GET | `hr.manage` | month's payslips · CSV download |
+| `payslips/` | GET | own **finalised** only · `hr.manage` sees all | employee payslip history |
+| `tasks/assignees/` | GET | any | hierarchy-filtered assignee list (your level & below) |
+| `tasks/{id}/estimate/` | POST | assignee, once | counter-estimate in minutes |
+| `tasks/{id}/complete/` | POST | assignee | complete with remarks + proof file (evidence enforced) |
+| `tasks/{id}/request_change/` | GET/POST | assignee/creator/admin | raise a Modification Request |
+| `tasks/{id}/restore/` · `?scope=deleted` | POST · GET | admin | Deleted-bin restore · listing |
+| `tasks/{id}/files/` | GET | visible | task attachments |
+| `task-change-requests/` + `/{id}/review/` | GET + POST | inbox/mine/all scopes · approver rules | Modification Request workflow; review decisions: approved / rejected / **escalated** (creator hands the call to admin) |
+| `task-categories/` | GET · CUD | read any (`?department=` filter) · write `tasks.assign` | managed category dropdown; DELETE deactivates, re-add reactivates |
+| `task-settings/` | GET · POST | any · `settings.manage` | completion-evidence policy |
 | `directory/industries/` | GET | any | industries + template counts + categories |
 | `directory/templates/` | GET · CUD | read any · write `settings.manage` | library (filters: industry, slug, category, tag, search) |
 | `directory/templates/{id}/create_tasks/` | POST | any (assigning to others needs `tasks.assign`) | steps → real tasks with due-date offsets |
@@ -330,6 +355,14 @@ Neon). Copy to `.env` and fill in what you have; blanks stay safely off.
 | `tests.py` | 28 tests — haversine accuracy, fence on/off/missing-GPS, office CRUD permissions, face enrolment permissions + validation, unenrolled/mismatch never marks, matching records confidence, check-in/out duplicates, half-day, `today` flags, history scoping across 3 roles, cross-employee month blocked, month classification (present/holiday/week-off/absent), `team_today` capability, correction request→review→attendance rewrite + self-review block, leave working-day counting, invalid range/overlap/document guards, approval writes LEAVE + notifies, rejection doesn't, cancel + revoke, balances, scoping, leave-type admin-only, check-in blocked on approved leave, config flags. |
 | `migrations/` | 0001 all HR models. |
 
+### `backend/payroll/` — salary & payroll
+| File | What it does |
+|---|---|
+| `models.py` | `SalaryStructure` (dated history so old payslips stay explainable), `Advance` (recovered from a payslip), `PayrollRun` (one per month, draft → finalised), `Payslip` (full figures + a `breakdown` JSON that explains every number). |
+| `services.py` | The whole calculation: `working_days_in()` (calendar − week-offs − `crm.Holiday`), `structure_for()` (latest effective salary), `paid_leave_dates()`, `count_days()` (attendance → present / half / paid leave / unpaid), `build_payslip()` (earned gross, PF on *earned* basic, PT, advances, **never negative**), `generate_run()` (rebuild a draft), `finalise()` (lock + settle advances). |
+| `views.py` | `SalaryStructureViewSet` and `AdvanceViewSet` (employees read their own, `hr.manage` writes), `PayrollRunViewSet` (create/regenerate/finalise/payslips/CSV export), `PayslipViewSet` (employees see only their own **finalised** slips). |
+| `tests.py` | 19 tests — working-day maths incl. holidays, full/absent/half-day/paid-vs-unpaid-leave pay, PF + PT + other deductions, PF pro-rating, **zero-attendance never goes negative**, latest-structure-wins, employees without salary skipped (not zeroed), advance recovery + cap + no double recovery, HR-only run creation, duplicate/invalid month, finalise locking, employee sees only own finalised slip, salary/advance write permissions, CSV export. |
+
 ### `backend/directory/` — Industry Task Template Directory
 | File | What it does |
 |---|---|
@@ -391,6 +424,9 @@ Neon). Copy to `.env` and fill in what you have; blanks stay safely off.
 | `src/pages/Forms.jsx` | Forms: Fill mode (published-form cards → in-app fill) and My Forms mode (create, builder, submissions). Builder: share-link card with copy, name/description, lead/task integration toggles (+ department, task title, field→lead mapping), field editor (add/edit-required/maps-to/reorder/delete), publish/disable/reopen. Submissions: table with person/lead/task, expandable answer detail + file links, **Export CSV** (authenticated blob download). |
 | `src/pages/FormRenderer.jsx` | Shared renderer for all 10 field types — used by the in-app fill page and the public page; multipart submit (answers + `file_<id>` uploads), per-field server error display, loading/busy state. |
 | `src/pages/PublicForm.jsx` | The `/f/<token>` share-link page — works **without login**, branded card, thank-you state, not-found handling. |
+| `src/face.js` | Lazy loader for the face engine: dynamically imports `@vladmandic/face-api`, loads the three model nets from `/models`, and exposes `describeFace(video)` → a 128-number descriptor (throws user-facing messages for "no face" / "more than one face") plus `isSupported()`. |
+| `src/pages/FaceCapture.jsx` | The camera modal used for both check-in and enrolment: `getUserMedia`, mirrored preview with a guide oval, progress status while models load, per-error messages (permission denied / no camera / no face), always stops the camera stream on close, and returns only the descriptor. |
+| `src/pages/Payroll.jsx` | Two exports used by the HR page: **PayrollAdmin** (`hr.manage`) with Monthly-payroll / Salaries / Advances sub-tabs — run a month, recalculate a draft, finalise, per-employee payslip table, CSV download; and **MySalary** (everyone) — current salary, payslip history, and a line-by-line payslip breakdown. |
 | `src/pages/Directory.jsx` | The **Template Directory** tab inside Tasks: industry cards → category filter / global search → template list with tags & step counts → expandable step preview → "Create N tasks" (assignee + group pickers) and "Add to my Task Templates". |
 | `src/pages/HR.jsx` | Attendance & leave, role-aware tabs: **Today** (check-in/out with browser geolocation, live status tiles, policy/feature banner), **My Attendance** (month picker, per-status totals, day table with late/early/no-checkout flags, "Fix" → correction request), **My Leave** (balance tiles, apply modal with document upload when required, history, cancel), **Team** (today's roster + counts, drill into any member's month) and **Approvals** (pending leave + corrections with remarks, approve/reject) for `hr.approve`, plus **HR Settings** (office geo-fences with "use my current location", leave types, live policy readout) for `hr.manage`. |
 
@@ -420,7 +456,7 @@ venv\Scripts\python backend\manage.py test crm        # one app
 `crm/tests_assignment.py` (12), `crm/tests_dashboard.py` (5),
 `crm/tests_tasks.py` (11), `crm/tests_tasks_area.py` (16),
 `notifications/tests.py` (6), `intake/tests.py` (18),
-`workspace/tests.py` (21), `webforms/tests.py` (13), `hr/tests.py` (28) —
+`workspace/tests.py` (21), `webforms/tests.py` (13), `hr/tests.py` (28), `hr/tests_hr_role.py` (12), `directory/tests.py` (14), `payroll/tests.py` (19) —
 run the command for the authoritative count.
 Every phase was additionally verified end-to-end in the browser (login flows,
 drag-and-drop, uploads, round-robin, notifications, simulator, group
@@ -485,7 +521,12 @@ the advanced due date, same assignee/subscribers.
 
 ## 13. Not built yet
 
-- **Phase 7 — Industry template directory** (JSON/CSV-seeded template marketplace).
+- **Payroll**: salary structures with history, monthly runs computed from
+  attendance (working days, LWP, paid-vs-unpaid leave), PF / professional tax /
+  other deductions, advances recovered and settled on finalise, draft →
+  finalised lifecycle, CSV export, employee "My Salary" payslip view.
+  Two guardrails caught during the build: PF is charged on *earned* basic, and
+  a payslip can never go below zero. 19 new API tests (206 total).
 - **Phase 8 — External integrations**: IndiaMART / TradeIndia adapters (need their paid API keys; new sources create inbound records and reuse the existing pipeline + `auto_assign`), Google Calendar/Sheets, outbound webhooks, CSV import.
 - **Phase 9 — Support ecosystem**: tickets, events, tutorials, help center, setup checklist, KAM/CS profiles, Achievers Club.
 - **Phase 10 — Production**: Neon `DATABASE_URL`, `render.yaml` + `DEBUG=false`/`ALLOWED_HOSTS` pass, then live WhatsApp/Gmail/Claude verification.

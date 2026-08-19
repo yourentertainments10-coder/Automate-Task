@@ -34,25 +34,35 @@ export default function Users() {
 /* ---------- Read-only directory (every role) ---------- */
 
 function Directory() {
-  const [rows, setRows] = useState([])
+  const { user } = useAuth()
+  const isManager = user.role === 'sales_manager'
+  const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
   const [fRole, setFRole] = useState('')
   const [err, setErr] = useState('')
 
   useEffect(() => { api('/api/team/').then(setRows).catch(e => setErr(e.message)) }, [])
 
-  const shown = useMemo(() => rows.filter(u => {
+  const shown = useMemo(() => (rows || []).filter(u => {
     if (fRole && u.role !== fRole) return false
     if (q.trim() && !`${u.name} ${u.username} ${u.email} ${u.mobile}`.toLowerCase().includes(q.trim().toLowerCase())) return false
     return true
   }), [rows, q, fRole])
 
+  if (err) return <div className="err">{err}</div>
+  if (!rows) return <div className="center-note">Loading…</div>
+
   return (
     <div>
       <div className="page-head">
         <h1>My Team</h1>
-        <span className="muted small">{rows.length} members</span>
+        <span className="muted small">
+          {isManager ? 'Reporting to you' : 'Your department'} · {rows.length} member{rows.length === 1 ? '' : 's'}
+        </span>
       </div>
+      {isManager && rows.length === 0 && (
+        <p className="muted">No one reports to you yet — ask Admin/HR to set "Reports to" on your team members.</p>
+      )}
       <div className="filters">
         <input type="search" placeholder="Search team member…" value={q} onChange={e => setQ(e.target.value)} />
         <select value={fRole} onChange={e => setFRole(e.target.value)}>

@@ -34,6 +34,20 @@ class AuthTests(TestCase):
         res = self.login("boss", "wrong")
         self.assertEqual(res.status_code, 401)
 
+    def test_login_with_email_works(self):
+        res = self.client.post("/api/auth/login",
+                               {"username": "boss@x.com", "password": "pass@12345"})
+        self.assertEqual(res.status_code, 200)
+        # case-insensitive too
+        res = self.client.post("/api/auth/login",
+                               {"username": "BOSS@X.COM", "password": "pass@12345"})
+        self.assertEqual(res.status_code, 200)
+
+    def test_login_with_unknown_email_fails(self):
+        res = self.client.post("/api/auth/login",
+                               {"username": "nobody@x.com", "password": "pass@12345"})
+        self.assertEqual(res.status_code, 401)
+
     def test_inactive_user_cannot_login(self):
         self.exec_.is_active = False
         self.exec_.save()

@@ -1,0 +1,22 @@
+{
+  "name": "CarTrends CRM",
+  "short_name": "CarTrends",
+  "description": "Leads, tasks, attendance and payroll for the CarTrends team.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#14201c",
+  "theme_color": "#0d7a5f",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Mark attendance", "url": "/hr", "description": "Check in or out" },
+    { "name": "Leads", "url": "/leads", "description": "Open the pipeline" },
+    { "name": "My tasks", "url": "/tasks", "description": "Today's work" }
+  ]
+}

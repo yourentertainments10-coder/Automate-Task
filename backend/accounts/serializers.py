@@ -1,8 +1,22 @@
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import User
 from .permissions import capabilities_for
+
+
+class FlexibleLoginSerializer(TokenObtainPairSerializer):
+    """Sign in with either the username OR the email address -- people
+    remember their email far more reliably than a username."""
+
+    def validate(self, attrs):
+        login = (attrs.get(self.username_field) or "").strip()
+        if "@" in login:
+            match = User.objects.filter(email__iexact=login).order_by("id").first()
+            if match:
+                attrs[self.username_field] = match.username
+        return super().validate(attrs)
 
 
 class UserSerializer(serializers.ModelSerializer):

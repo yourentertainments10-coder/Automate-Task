@@ -186,16 +186,16 @@ class UseTemplateTests(TestCase):
         self.assertIsNotNone(tasks[1].due_at)       # offset 1 -> due tomorrow
         self.assertTrue(tasks[0].activities.filter(text__contains="directory template").exists())
 
-    def test_create_tasks_for_others_needs_capability_and_notifies(self):
+    def test_create_tasks_hierarchy_and_notifies(self):
         from notifications.models import Notification
+        # Task Engine v2: peer-to-peer allowed, upward blocked
         self.as_(self.rahul)
         res = self.client.post(f"/api/directory/templates/{self.tpl.id}/create_tasks/",
-                               {"assigned_to": self.amit.id}, format="json")
-        self.assertEqual(res.status_code, 403)
-        self.as_(self.manager)
+                               {"assigned_to": self.manager.id}, format="json")
+        self.assertEqual(res.status_code, 403)          # employee -> manager: no
         res = self.client.post(f"/api/directory/templates/{self.tpl.id}/create_tasks/",
                                {"assigned_to": self.amit.id}, format="json")
-        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.status_code, 201)          # employee -> employee: yes
         self.assertEqual(Task.objects.filter(assigned_to=self.amit).count(), 2)
         self.assertTrue(Notification.objects.filter(user=self.amit, type="task_assigned").exists())
 

@@ -6,27 +6,7 @@
 - **Phase 10 — Production**: Neon `DATABASE_URL`, `render.yaml` + `DEBUG=false`/`ALLOWED_HOSTS` pass, then live WhatsApp/Gmail/Claude verification.
 - Live credential wiring: WhatsApp send/receive, Gmail send/poll and Claude classification are fully coded but run in `skipped`/fallback mode until keys are pasted into `backend/.env`.
 
-Phase 8: Integrations 🔴
 
-Ye remaining integrations:
-
-Lead Sources
-IndiaMART
-TradeIndia
-Productivity
-Google Calendar
-Google Sheets
-Developer/API
-Webhooks
-General API
-Data
-CSV Import
-
-IndiaMART/TradeIndia ka flow ideally:
-
-External Lead → InboundMessage → AI → Existing Lead check → New/Existing Lead → Auto Assignment → Notification
-
-hona chahiye.
 
 Phase 9: Support & Customer Success 🔴
 
@@ -68,9 +48,15 @@ WhatsApp credentials
 Gmail credentials
 Claude API key
 
-Aur:
 
-IndiaMART credentials
-TradeIndia credentials
 
-jab available hon.
+
+### Admin Employee Performance Dashboard
+
+Admins can get a complete overview of all employees from a single, well-designed dashboard. The interface provides a clear and organized view of each employee’s task performance, including **total tasks, performance score, overdue tasks, pending tasks, in-progress tasks, completed tasks, on-time completion, and delayed tasks**.
+
+The dashboard also includes **time-based filters** such as Today, Yesterday, This Week, Last Week, This Month, Last Month, and This Year, making it easy for admins to analyze performance over different periods.
+
+Employees can be compared through a detailed table with their **individual scores and task statistics**, while visual indicators make the data easy to understand at a glance. Admins can also switch between **Table and Bar Chart views** and filter data by employee, category, tags, frequency, and other parameters.
+
+Overall, this feature gives admins a **centralized, data-driven view of employee productivity, task completion, delays, and performance**, helping them quickly identify high performers, delayed work, and areas that need attention.

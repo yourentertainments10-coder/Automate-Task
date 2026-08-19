@@ -20,10 +20,21 @@ def me(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def team_directory(request):
-    """Read-only company directory -- every signed-in employee can see who
-    is who, their mobile, and who they report to (like the reference app's
-    My Team). Management actions stay admin-only in UserViewSet."""
-    users = User.objects.filter(is_active=True).select_related("reporting_manager").order_by("first_name", "username")
+    """Read-only "My Team" directory, scoped by who you are:
+    - users.manage (Admin, HR Manager): the whole company
+    - a manager: ONLY the employees who report directly to them
+    - everyone else: their own department
+    Management actions stay in UserViewSet (users.manage)."""
+    from .permissions import has_capability
+    viewer = request.user
+    users = User.objects.filter(is_active=True).select_related("reporting_manager")
+    if has_capability(viewer, "users.manage"):
+        pass                                            # whole company
+    elif viewer.role == Role.SALES_MANAGER or users.filter(reporting_manager=viewer).exists():
+        users = users.filter(reporting_manager=viewer)  # direct reports only
+    else:
+        users = users.filter(department=viewer.department)
+    users = users.order_by("first_name", "username")
     return Response([
         {
             "id": u.id,

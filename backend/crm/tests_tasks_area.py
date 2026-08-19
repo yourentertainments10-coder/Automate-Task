@@ -54,7 +54,8 @@ class ScopeTabTests(Base):
 
     def test_creator_auto_subscribes_via_api(self):
         self.as_(self.manager)
-        res = self.client.post("/api/tasks/", {"title": "New", "assigned_to": self.rahul.id})
+        res = self.client.post("/api/tasks/", {"title": "New", "assigned_to": self.rahul.id,
+                                               "effort_minutes": 30})
         task = Task.objects.get(pk=res.data["id"])
         self.assertTrue(task.subscribers.filter(pk=self.manager.pk).exists())
 
@@ -159,7 +160,8 @@ class TemplateHolidayTests(Base):
 
     def test_activities_feed_scoped(self):
         self.as_(self.manager)
-        res = self.client.post("/api/tasks/", {"title": "Audit me", "assigned_to": self.rahul.id})
+        res = self.client.post("/api/tasks/", {"title": "Audit me", "assigned_to": self.rahul.id,
+                                               "effort_minutes": 30})
         self.as_(self.rahul)
         acts = self.client.get("/api/task-activities/").data
         rows = acts["results"] if "results" in acts else acts
@@ -172,15 +174,31 @@ class TemplateHolidayTests(Base):
 
 
 class TeamDirectoryTests(Base):
-    def test_every_role_can_read_directory_with_reports_to(self):
+    """My Team scoping: admin = everyone, manager = direct reports only,
+    employee = own department."""
+
+    def test_admin_sees_whole_company(self):
+        self.as_(self.admin)
+        self.assertEqual(len(self.client.get("/api/team/").data), 4)
+
+    def test_manager_sees_only_direct_reports(self):
         self.rahul.reporting_manager = self.manager
         self.rahul.save()
-        self.as_(self.rahul)
-        res = self.client.get("/api/team/")
-        self.assertEqual(res.status_code, 200)
-        me = next(r for r in res.data if r["username"] == "rahul")
-        self.assertEqual(me["reports_to"], "meera")
-        self.assertEqual(len(res.data), 4)
+        self.as_(self.manager)
+        rows = self.client.get("/api/team/").data
+        self.assertEqual([r["username"] for r in rows], ["rahul"])
+        self.assertEqual(rows[0]["reports_to"], "meera")
+        # amit reports to nobody -> not in meera's team even though same dept
+        self.assertNotIn("amit", [r["username"] for r in rows])
+
+    def test_manager_with_no_reports_sees_empty_list(self):
+        self.as_(self.manager)
+        self.assertEqual(self.client.get("/api/team/").data, [])
+
+    def test_employee_sees_own_department_only(self):
+        self.as_(self.rahul)   # sales executive
+        names = sorted(r["username"] for r in self.client.get("/api/team/").data)
+        self.assertEqual(names, ["amit", "meera", "rahul"])   # sales dept, not admin (management)
 
     def test_directory_hides_deactivated(self):
         self.amit.is_active = False

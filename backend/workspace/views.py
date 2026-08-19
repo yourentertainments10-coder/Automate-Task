@@ -78,7 +78,7 @@ class GroupViewSet(viewsets.ModelViewSet):
     def dashboard(self, request, pk=None):
         group = self.get_object()
         now = timezone.now()
-        rows = list(group.tasks.values("status", "due_at"))
+        rows = list(group.tasks.filter(deleted_at__isnull=True).values("status", "due_at"))
         open_rows = [t for t in rows if t["status"] != TaskStatus.DONE]
         tiles = {
             "total": len(rows),

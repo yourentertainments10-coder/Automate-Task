@@ -99,6 +99,7 @@ class AttendanceViewSet(viewsets.ReadOnlyModelViewSet):
             "can_check_out": bool(rec and rec.check_in and not rec.check_out),
             "geofence_enabled": conf["geofence_enabled"],
             "face_enabled": conf["face_enabled"],
+            "face_self_enroll": conf["face_self_enroll"],
             "face_enrolled": FaceProfile.objects.filter(user=request.user).exists(),
             "work_start": conf["work_start"], "work_end": conf["work_end"],
         })
@@ -139,6 +140,33 @@ class AttendanceViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["get"], permission_classes=[HasCapability.of("hr.approve")])
     def team_today(self, request):
         return Response(services.today_summary(list(managed_users(request.user))))
+
+    @action(detail=False, methods=["post"], permission_classes=[HasCapability.of("hr.manage")])
+    def manual_mark(self, request):
+        """HR override: mark an employee present/half-day/absent by hand —
+        for the day the face lock (or their phone) refuses to cooperate.
+        Always audited: the record notes who marked it."""
+        target = User.objects.filter(pk=request.data.get("user"), is_active=True).first()
+        if not target:
+            raise ValidationError({"user": "Unknown or inactive employee."})
+        status_value = request.data.get("status", "present")
+        if status_value not in ("present", "half_day", "absent"):
+            raise ValidationError({"status": "Use present, half_day or absent."})
+        try:
+            day = (timezone.datetime.strptime(request.data["date"], "%Y-%m-%d").date()
+                   if request.data.get("date") else timezone.localdate())
+        except (ValueError, TypeError):
+            raise ValidationError({"date": "Use YYYY-MM-DD."})
+        if day > timezone.localdate():
+            raise ValidationError({"date": "Cannot mark attendance for a future date."})
+
+        record, _ = Attendance.objects.get_or_create(user=target, date=day)
+        record.status = status_value
+        reason = str(request.data.get("reason", "")).strip()[:120]
+        record.note = (f"Marked {status_value} by {request.user.get_full_name() or request.user.username}"
+                       + (f": {reason}" if reason else ""))
+        record.save(update_fields=["status", "note"])
+        return Response(AttendanceSerializer(record).data)
 
 
 class CorrectionViewSet(viewsets.ModelViewSet):

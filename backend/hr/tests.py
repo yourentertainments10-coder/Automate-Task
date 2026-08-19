@@ -25,6 +25,11 @@ def make(username, role, department="sales"):
 
 class Base(TestCase):
     def setUp(self):
+        # Tests must not inherit whatever flags the developer has in .env --
+        # each feature test switches its own flag on explicitly.
+        import os
+        os.environ["FACE_RECOGNITION_ENABLED"] = "false"
+        os.environ["GEOFENCE_ENABLED"] = "false"
         self.client = APIClient()
         self.admin = make("boss", Role.ADMIN, "management")
         self.manager = make("meera", Role.SALES_MANAGER)
@@ -92,12 +97,15 @@ class GeoFenceTests(Base):
 
 
 class FaceTests(Base):
-    def enable(self, value="true"):
+    def enable(self, value="true", self_enroll="false"):
         import os
         os.environ["FACE_RECOGNITION_ENABLED"] = value
+        os.environ["FACE_SELF_ENROLL"] = self_enroll
 
     def tearDown(self):
-        self.enable("false")
+        import os
+        os.environ["FACE_RECOGNITION_ENABLED"] = "false"
+        os.environ.pop("FACE_SELF_ENROLL", None)
 
     def test_enrolment_is_admin_only_and_validated(self):
         self.as_(self.manager)
@@ -140,6 +148,80 @@ class FaceTests(Base):
         rec = Attendance.objects.get()
         self.assertTrue(rec.face_verified)
         self.assertGreater(rec.face_confidence, 0.9)
+
+    def test_self_enrolment_first_capture_becomes_profile(self):
+        from notifications.models import Notification
+        self.enable(self_enroll="true")
+        self.as_(self.rahul)
+        # First check-in with no profile: enrols AND marks attendance
+        res = self.client.post("/api/attendance/check_in/",
+                               {"face_descriptor": [0.2] * 64}, format="json")
+        self.assertEqual(res.status_code, 201)
+        profile = FaceProfile.objects.get(user=self.rahul)
+        self.assertIsNone(profile.enrolled_by)          # None = self-enrolled
+        self.assertTrue(Attendance.objects.get().face_verified)
+        # HR/Admin got told about it
+        self.assertTrue(Notification.objects.filter(type="face_enrolled",
+                                                    user=self.admin).exists())
+        # Check-out with a DIFFERENT face must now fail — profile is locked in
+        res = self.client.post("/api/attendance/check_out/",
+                               {"face_descriptor": [0.9] * 64}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("did not match", res.data["detail"])
+        # ...and with the same face it succeeds
+        res = self.client.post("/api/attendance/check_out/",
+                               {"face_descriptor": [0.21] * 64}, format="json")
+        self.assertIn(res.status_code, (200, 201))
+
+    def test_self_enrolment_off_keeps_old_behaviour(self):
+        self.enable(self_enroll="false")
+        self.as_(self.rahul)
+        res = self.client.post("/api/attendance/check_in/",
+                               {"face_descriptor": [0.2] * 64}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("not enrolled", res.data["detail"])
+        self.assertFalse(FaceProfile.objects.filter(user=self.rahul).exists())
+
+    def test_reset_then_fresh_self_enrolment(self):
+        """HR resets a broken profile; the employee's next capture re-enrols."""
+        self.enable(self_enroll="true")
+        FaceProfile.objects.create(user=self.rahul, descriptor=[0.9] * 64)
+        self.as_(self.admin)
+        self.client.delete(f"/api/hr/face/{self.rahul.id}/")
+        self.as_(self.rahul)
+        res = self.client.post("/api/attendance/check_in/",
+                               {"face_descriptor": [0.1] * 64}, format="json")
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(FaceProfile.objects.get(user=self.rahul).descriptor[0], 0.1)
+
+
+class ManualMarkTests(Base):
+    def test_hr_marks_present_with_audit_note(self):
+        self.as_(self.admin)
+        res = self.client.post("/api/attendance/manual_mark/",
+                               {"user": self.rahul.id, "status": "present",
+                                "reason": "face lock not working"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        rec = Attendance.objects.get(user=self.rahul)
+        self.assertEqual(rec.status, "present")
+        self.assertIn("Marked present by", rec.note)
+        self.assertIn("face lock not working", rec.note)
+
+    def test_manager_cannot_manual_mark(self):
+        self.as_(self.manager)   # hr.approve but not hr.manage
+        res = self.client.post("/api/attendance/manual_mark/",
+                               {"user": self.rahul.id}, format="json")
+        self.assertEqual(res.status_code, 403)
+
+    def test_future_date_and_bad_status_rejected(self):
+        self.as_(self.admin)
+        future = (timezone.localdate() + timedelta(days=2)).isoformat()
+        self.assertEqual(self.client.post("/api/attendance/manual_mark/",
+                                          {"user": self.rahul.id, "date": future},
+                                          format="json").status_code, 400)
+        self.assertEqual(self.client.post("/api/attendance/manual_mark/",
+                                          {"user": self.rahul.id, "status": "leave"},
+                                          format="json").status_code, 400)
 
 
 class AttendanceFlowTests(Base):

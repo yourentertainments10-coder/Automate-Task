@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BrowserRouter, Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
+import {
+  BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate,
+} from 'react-router-dom'
 import { api } from './api'
 import { AuthProvider, useAuth } from './auth'
 import Login from './pages/Login'
@@ -18,10 +20,20 @@ import Forms from './pages/Forms'
 import PublicForm from './pages/PublicForm'
 import HR from './pages/HR'
 
+/* Page titles for the mobile top bar */
+const TITLES = {
+  '/': 'Dashboard', '/leads': 'Leads', '/tasks': 'Tasks', '/groups': 'Groups',
+  '/notices': 'Notices', '/links': 'Links', '/ideas': 'Idea Board',
+  '/forms': 'Forms', '/hr': 'Attendance', '/notifications': 'Notifications',
+  '/intake': 'AI Inbox', '/users': 'My Team', '/settings': 'Automation',
+}
+
 function Shell({ children }) {
   const { user, can, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [unread, setUnread] = useState(0)
+  const [navOpen, setNavOpen] = useState(false)
 
   const refreshUnread = useCallback(() => {
     api('/api/notifications/unread_count/').then(d => setUnread(d.count)).catch(() => {})
@@ -32,19 +44,33 @@ function Shell({ children }) {
     return () => clearInterval(t)
   }, [refreshUnread])
 
+  // Close the drawer whenever the route changes (tapping a link on a phone)
+  useEffect(() => { setNavOpen(false) }, [location.pathname])
+
   const kids = typeof children === 'function' ? children({ refreshUnread }) : children
 
   return (
-    <div className="shell">
+    <div className={'shell' + (navOpen ? ' nav-open' : '')}>
+      <header className="mobile-bar">
+        <button className="icon-btn" onClick={() => setNavOpen(v => !v)} aria-label="Menu">
+          <span className="burger" />
+        </button>
+        <span className="mobile-title">{TITLES[location.pathname] || 'CarTrends'}</span>
+        <button className="icon-btn" onClick={() => navigate('/notifications')} aria-label="Notifications">
+          🔔{unread > 0 && <span className="badge-dot">{unread > 9 ? '9+' : unread}</span>}
+        </button>
+      </header>
+
+      <div className="nav-scrim" onClick={() => setNavOpen(false)} />
+
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">CT</span>
-          <div>CarTrends <small>CRM</small></div>
+          <div>Automation Task<small>CarTrends</small></div>
         </div>
         <nav>
           <NavLink to="/" end>Dashboard</NavLink>
           {user.capabilities.some(c => c.startsWith('leads.view')) && <NavLink to="/leads">Leads</NavLink>}
-          {/* HR Manager has no sales access — their landing area is Attendance */}
           <NavLink to="/tasks">Tasks</NavLink>
           <NavLink to="/groups">Groups</NavLink>
           <NavLink to="/notices">Notices</NavLink>
@@ -72,6 +98,7 @@ function Shell({ children }) {
           </button>
         </div>
       </aside>
+
       <main className="content">{kids}</main>
     </div>
   )

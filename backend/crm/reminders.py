@@ -3,13 +3,41 @@ ONE notification per follow-up (reminded_at tracks the last ping, so a
 rescheduled follow-up triggers again, but the same one never repeats).
 Called by the in-process ticker (notifications.apps) and by
 `manage.py send_reminders` for cron/manual use.
+
+Also home to the attachment-retention sweep: files on finished tasks are
+kept TASK_ATTACHMENT_RETENTION_DAYS (default 7) after completion, then
+deleted from disk and DB (reviewer's storage rule, 19 Aug demo).
 """
+import os
+
 from django.db.models import F, Q
 from django.utils import timezone
 
 from notifications.service import notify, notify_follow_up_due
 
-from .models import Lead, OPEN_STATUSES, Task, TaskStatus
+from .models import Lead, OPEN_STATUSES, Task, TaskAttachment, TaskStatus
+
+
+def purge_expired_attachments() -> int:
+    """Delete attachments on tasks completed more than the retention window
+    ago. Only DONE tasks with a completed_at qualify — open/deleted-but-open
+    tasks keep their files."""
+    days = int(os.environ.get("TASK_ATTACHMENT_RETENTION_DAYS", "7"))
+    if days <= 0:  # 0 or negative disables the sweep entirely
+        return 0
+    cutoff = timezone.now() - timezone.timedelta(days=days)
+    expired = TaskAttachment.objects.filter(
+        task__status=TaskStatus.DONE,
+        task__completed_at__isnull=False,
+        task__completed_at__lt=cutoff,
+    )
+    removed = 0
+    for att in expired:
+        if att.file:
+            att.file.delete(save=False)  # remove from storage first
+        att.delete()
+        removed += 1
+    return removed
 
 
 def send_task_reminders() -> int:
@@ -17,7 +45,7 @@ def send_task_reminders() -> int:
     now = timezone.now()
     due = (
         Task.objects.exclude(status=TaskStatus.DONE)
-        .filter(due_at__isnull=False, due_at__lte=now)
+        .filter(deleted_at__isnull=True, due_at__isnull=False, due_at__lte=now)
         .filter(Q(reminded_at__isnull=True) | Q(reminded_at__lt=F("due_at")))
         .select_related("assigned_to", "lead")
     )
@@ -54,4 +82,6 @@ def send_followup_reminders() -> int:
         lead.reminded_at = now
         lead.save(update_fields=["reminded_at"])
         sent += 1
-    return sent + send_task_reminders()
+    sent += send_task_reminders()
+    purge_expired_attachments()
+    return sent

@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from accounts.models import User
 from accounts.permissions import HasCapability, has_capability
 from crm.models import Task, TaskActivity, TaskTemplate
-from crm.scoping import can_assign_tasks
+from crm.scoping import can_assign_to
 from crm.serializers import TaskSerializer, TaskTemplateSerializer
 
 from .models import DirectoryTemplate, Industry
@@ -122,11 +122,11 @@ class DirectoryTemplateViewSet(viewsets.ModelViewSet):
         assignee_id = request.data.get("assigned_to")
         assignee = request.user
         if assignee_id and str(assignee_id) != str(request.user.id):
-            if not can_assign_tasks(request.user):
-                raise PermissionDenied("Your role cannot assign tasks to other people.")
             assignee = User.objects.filter(pk=assignee_id, is_active=True).first()
             if not assignee:
                 raise ValidationError({"assigned_to": "Unknown or inactive user."})
+            if not can_assign_to(request.user, assignee):
+                raise PermissionDenied("You can assign tasks to people at your level or below.")
 
         group = None
         if request.data.get("group"):

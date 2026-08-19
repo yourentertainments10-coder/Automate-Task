@@ -41,6 +41,7 @@ class TaskApiTests(TaskBase):
         self.as_(self.manager)
         res = self.client.post("/api/tasks/", {
             "title": "Call Ravi with quote", "assigned_to": self.rahul.id,
+            "effort_minutes": 45,
             "lead": self.lead.id, "priority": "high",
             "due_at": (timezone.now() + timedelta(days=1)).isoformat(),
         })
@@ -50,14 +51,21 @@ class TaskApiTests(TaskBase):
         self.assertIn("Call Ravi", n.title)
         self.assertTrue(self.lead.events.filter(body__contains="Task created").exists())
 
-    def test_exec_cannot_assign_to_others(self):
+    def test_exec_assigns_to_peer_but_not_upward(self):
+        # Task Engine v2 hierarchy: employee -> fellow employee is ALLOWED,
+        # employee -> manager is not.
         self.as_(self.rahul)
-        res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.amit.id})
+        res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.amit.id,
+                                               "effort_minutes": 30})
+        self.assertEqual(res.status_code, 201)
+        res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.manager.id,
+                                               "effort_minutes": 30})
         self.assertEqual(res.status_code, 403)
 
     def test_exec_can_create_own_task(self):
         self.as_(self.rahul)
-        res = self.client.post("/api/tasks/", {"title": "Prepare catalogue", "assigned_to": self.rahul.id})
+        res = self.client.post("/api/tasks/", {"title": "Prepare catalogue", "assigned_to": self.rahul.id,
+                                               "effort_minutes": 60})
         self.assertEqual(res.status_code, 201)
         # No self-notification
         self.assertFalse(Notification.objects.filter(user=self.rahul, type="task_assigned").exists())
@@ -66,7 +74,7 @@ class TaskApiTests(TaskBase):
         other_lead = Lead.objects.create(customer_name="P", department="purchase")
         self.as_(self.rahul)
         res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.rahul.id,
-                                               "lead": other_lead.id})
+                                               "effort_minutes": 30, "lead": other_lead.id})
         self.assertEqual(res.status_code, 403)
 
     def test_scoping(self):
@@ -101,11 +109,16 @@ class TaskApiTests(TaskBase):
         self.as_(self.amit)
         self.assertEqual(self.client.patch(f"/api/tasks/{t.id}/", {"status": "done"}).status_code, 404)
 
-    def test_reassign_needs_capability_and_notifies(self):
+    def test_direct_reassignment_is_admin_only_now(self):
+        # B1 lockdown: neither the assignee nor even the creator can reassign
+        # directly any more -- that goes through a Modification Request.
+        # Admin can, and the new assignee is notified.
         t = Task.objects.create(title="Call", assigned_to=self.rahul, created_by=self.manager)
         self.as_(self.rahul)
         self.assertEqual(self.client.patch(f"/api/tasks/{t.id}/", {"assigned_to": self.amit.id}).status_code, 403)
         self.as_(self.manager)
+        self.assertEqual(self.client.patch(f"/api/tasks/{t.id}/", {"assigned_to": self.amit.id}).status_code, 403)
+        self.as_(self.admin)
         self.assertEqual(self.client.patch(f"/api/tasks/{t.id}/", {"assigned_to": self.amit.id}).status_code, 200)
         self.assertTrue(Notification.objects.filter(user=self.amit, type="task_assigned").exists())
 

@@ -35,6 +35,9 @@ def cfg():
         "geofence_enabled": _env("GEOFENCE_ENABLED", "false").lower() == "true",
         "face_enabled": _env("FACE_RECOGNITION_ENABLED", "false").lower() == "true",
         "face_threshold": float(_env("FACE_MATCH_THRESHOLD", "0.6")),
+        # Phone-style enrolment: an unenrolled employee's FIRST face capture
+        # becomes their profile (HR is notified and can reset it any time).
+        "face_self_enroll": _env("FACE_SELF_ENROLL", "true").lower() == "true",
     }
 
 
@@ -93,6 +96,23 @@ def face_distance(a, b) -> float:
     return math.sqrt(sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)))
 
 
+def _notify_self_enrolment(user):
+    """Tell HR/Admin that a face was self-enrolled, so a wrong first capture
+    (or someone enrolling on a colleague's phone) is visible immediately."""
+    from accounts.models import User
+    from accounts.permissions import ROLE_CAPABILITIES
+    from notifications.service import notify
+    hr_roles = [role for role, caps in ROLE_CAPABILITIES.items() if "hr.manage" in caps]
+    for manager in User.objects.filter(is_active=True, role__in=hr_roles).exclude(pk=user.pk):
+        notify(
+            manager, "face_enrolled",
+            f"Face self-enrolled: {user.get_full_name() or user.username}",
+            "Their first face capture is now their attendance profile. "
+            "If this looks wrong, reset it in HR Settings -> Face attendance.",
+            link="/hr",
+        )
+
+
 def verify_face(user, descriptor):
     """Returns (verified, confidence). Raises HRError when face attendance
     is required but cannot be established -- we NEVER mark attendance on a
@@ -102,6 +122,13 @@ def verify_face(user, descriptor):
         return False, None
     profile = FaceProfile.objects.filter(user=user).first()
     if not profile or not profile.descriptor:
+        # Phone-style first-time setup: the first good capture becomes the profile.
+        if conf["face_self_enroll"] and descriptor and 32 <= len(descriptor) <= 512:
+            FaceProfile.objects.create(user=user,
+                                       descriptor=[float(x) for x in descriptor],
+                                       enrolled_by=None)   # None = self-enrolled
+            _notify_self_enrolment(user)
+            return True, 1.0
         raise HRError("Face attendance is on but your face is not enrolled yet. Ask an admin to enrol you.")
     if not descriptor:
         raise HRError("Face scan required. Allow camera access and try again.")
@@ -110,7 +137,12 @@ def verify_face(user, descriptor):
     dist = face_distance(descriptor, profile.descriptor)
     confidence = max(0.0, 1.0 - dist)
     if dist > conf["face_threshold"]:
-        raise HRError("Face did not match your enrolled profile. Attendance not marked.")
+        raise HRError(
+            f"Face did not match your enrolled profile "
+            f"(score {dist:.2f}, allowed up to {conf['face_threshold']:.2f}). "
+            "Attendance not marked. Try better light, or ask HR to reset your "
+            "face profile / mark you present."
+        )
     return True, round(confidence, 3)
 
 

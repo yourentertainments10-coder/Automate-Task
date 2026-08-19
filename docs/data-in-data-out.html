@@ -1,0 +1,154 @@
+<title>Data In, Data Out</title>
+<style>
+  :root {
+    --ground: #f7f6f2; --surface: #ffffff; --surface-2: #f1efe9;
+    --ink: #16211d; --ink-2: #3d4a45; --muted: #6b7570; --line: #ded9cf;
+    --accent: #0d7a5f; --accent-soft: #e2efe9;
+    --attention: #a5590a; --stop: #a3392f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101613; --surface: #171f1b; --surface-2: #1e2723;
+      --ink: #e7ece9; --ink-2: #bcc7c2; --muted: #8d9994; --line: #2c3833;
+      --accent: #4fc39c; --accent-soft: #1a2f28;
+      --attention: #d99341; --stop: #e0796d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #101613; --surface: #171f1b; --surface-2: #1e2723;
+    --ink: #e7ece9; --ink-2: #bcc7c2; --muted: #8d9994; --line: #2c3833;
+    --accent: #4fc39c; --accent-soft: #1a2f28;
+    --attention: #d99341; --stop: #e0796d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground); color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 16.5px; line-height: 1.6; margin: 0; padding: 0 20px 72px;
+  }
+  .wrap { max-width: 70ch; margin: 0 auto; }
+  h1, h2 {
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-weight: 600; text-wrap: balance; letter-spacing: -0.01em;
+  }
+  h1 { font-size: 2.3rem; line-height: 1.1; margin: 0 0 10px; }
+  h2 { font-size: 1.35rem; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: var(--ink-2); }
+  strong { color: var(--ink); font-weight: 600; }
+  ul { margin: 0 0 12px; padding-left: 20px; color: var(--ink-2); }
+  li { margin-bottom: 6px; }
+  li::marker { color: var(--accent); }
+  header.doc { border-bottom: 2px solid var(--ink); padding: 56px 0 18px; margin-bottom: 28px; }
+  .eyebrow {
+    font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+    letter-spacing: 0.13em; text-transform: uppercase; color: var(--accent); margin: 0 0 12px;
+  }
+  .standfirst { font-size: 1.08rem; color: var(--ink-2); margin: 0; }
+  section { margin-bottom: 34px; }
+  .head { display: flex; align-items: baseline; gap: 12px; border-top: 1px solid var(--line); padding-top: 22px; margin-bottom: 14px; }
+  .tag {
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--accent);
+    letter-spacing: 0.1em; border: 1px solid var(--accent); border-radius: 3px;
+    padding: 2px 7px; flex-shrink: 0;
+  }
+  .card { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 6px; padding: 16px 18px; margin-bottom: 18px; }
+  .card ul { margin-bottom: 0; }
+  .today { border-left: 3px solid var(--stop); background: var(--surface-2); padding: 12px 16px; margin: 0 0 14px; border-radius: 0 5px 5px 0; }
+  .today p:last-child { margin-bottom: 0; }
+  .tablewrap { overflow-x: auto; margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; padding: 8px 11px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink-2); }
+  th { font-family: ui-monospace, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--ink); }
+  td strong { color: var(--ink); }
+  .yes { color: var(--attention); font-weight: 600; }
+  .no { color: var(--accent); font-weight: 600; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; }
+  .checklist { list-style: none; padding: 0; }
+  .checklist li { display: flex; gap: 11px; align-items: flex-start; padding: 10px 0; border-bottom: 1px dashed var(--line); margin: 0; color: var(--ink); }
+  .checklist li::before { content: ""; flex-shrink: 0; margin-top: 4px; width: 14px; height: 14px; border: 1.5px solid var(--accent); border-radius: 3px; }
+  footer.doc { border-top: 2px solid var(--ink); margin-top: 40px; padding-top: 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header class="doc">
+    <p class="eyebrow">CarTrends CRM · For decision</p>
+    <h1>Data In, Data&nbsp;Out</h1>
+    <p class="standfirst">
+      Two proposed features: <strong>CSV Import</strong> (get old data into the CRM) and
+      <strong>Webhooks</strong> (let the CRM swap data with other software automatically).
+      Neither needs an outside company, licence or payment.
+    </p>
+  </header>
+
+  <section>
+    <div class="head"><span class="tag">A</span><h2>CSV Import</h2></div>
+    <p>Upload a spreadsheet (<code>.csv</code> from Excel or Google Sheets) and every row becomes
+      a proper CRM lead — hundreds at once, instead of typing them in one by one.</p>
+    <div class="today">
+      <p><strong>Today:</strong> old enquiries sit in Google Sheets and Excel files. Nobody can
+        search them, nobody owns them, no follow-ups happen.</p>
+      <p><strong>After:</strong> each row is a lead with an owner, a stage and a follow-up date.</p>
+    </div>
+    <p>How it works: upload the file → match your columns to CRM fields (<code>Mobile No.</code> →
+      Phone) → preview with every error listed → choose what happens to duplicates → import, with
+      a summary and a download of any failed rows. <strong>No row is ever saved silently.</strong></p>
+    <p><strong>Where:</strong> an "Import" button on the Leads page.
+      <strong>Effort:</strong> about one day. <strong>Cost:</strong> nil.</p>
+  </section>
+
+  <section>
+    <div class="head"><span class="tag">B</span><h2>Webhooks</h2></div>
+    <p>One software automatically messaging another when something happens — replacing the person
+      who copies data between two systems. Two directions:</p>
+    <p><strong>Incoming — our website → CRM.</strong> A customer fills the enquiry form on our
+      site; a lead is created, assigned and notified within seconds.
+      <em>Note: if we simply put a CarTrends-built form link on our website, this already works
+      today and needs nothing new.</em> The webhook is only needed if we want to keep our own
+      form's design.</p>
+    <p><strong>Outgoing — CRM → other software.</strong> When a lead is won, a task is completed
+      or attendance is marked, the CRM tells another system automatically (accounting, payroll, a
+      reporting sheet). <strong>Only worth building if we actually run software that should
+      react</strong> — if everything lives inside the CRM, this can wait.</p>
+    <p>Both directions are signed and logged, keys can be revoked by an Admin, and they go live
+      once the CRM is on a public web address.
+      <strong>Effort:</strong> 1 day incoming, 1–2 outgoing. <strong>Cost:</strong> nil.</p>
+  </section>
+
+  <section>
+    <div class="head"><span class="tag">COST</span><h2>What needs an outside key</h2></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Feature</th><th>Outside key?</th><th>Cost</th></tr></thead>
+        <tbody>
+          <tr><td><strong>CSV import</strong></td><td class="no">No</td><td>Free</td></tr>
+          <tr><td><strong>Website form (CRM-built)</strong></td><td class="no">No</td><td>Free — works today</td></tr>
+          <tr><td><strong>Webhooks, both directions</strong></td><td class="no">No</td><td>Free</td></tr>
+          <tr><td>IndiaMART / TradeIndia</td><td class="yes">Yes</td><td>Paid add-on</td></tr>
+          <tr><td>Google Calendar / Sheets</td><td class="yes">Yes</td><td>Free, needs setup</td></tr>
+          <tr><td>WhatsApp / Gmail / AI</td><td class="yes">Yes</td><td>Meta charges per chat</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="head"><span class="tag">DECIDE</span><h2>What we need from you</h2></div>
+    <ul class="checklist">
+      <li>Which data to import first — and one real sample file with your actual columns.</li>
+      <li>If an imported phone number already exists: skip, update, or create a new lead?</li>
+      <li>Who owns imported leads — unassigned, auto round-robin, or from a column in the file?</li>
+      <li>Does our website already have its own enquiry form, and where do those enquiries go today?</li>
+      <li>Any other software that should receive CRM events? If none, we skip outgoing webhooks.</li>
+    </ul>
+    <div class="card">
+      <strong>Suggested order:</strong>
+      <ul>
+        <li><strong>CSV import first</strong> — highest value, no dependencies.</li>
+        <li><strong>Website enquiries next</strong> — start free by sharing the CRM form link.</li>
+        <li><strong>Outgoing webhooks last</strong> — only once a receiving system is named.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="doc">CarTrends CRM · internal note</footer>
+</div>

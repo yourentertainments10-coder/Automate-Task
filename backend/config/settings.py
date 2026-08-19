@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "webforms",
     "hr",
     "directory",
+    "payroll",
 ]
 
 MIDDLEWARE = [

@@ -277,7 +277,9 @@ function GroupMembers({ group, onChanged }) {
   const [team, setTeam] = useState([])
   const [adding, setAdding] = useState('')
   const [err, setErr] = useState('')
-  useEffect(() => { api('/api/team/').then(setTeam).catch(() => {}) }, [])
+  // assignees = ALL active users -- a group owner can add any colleague,
+  // not just the people who report to them (which is what /api/team/ returns now)
+  useEffect(() => { api('/api/leads/assignees/').then(setTeam).catch(() => {}) }, [])
 
   const memberIds = group.members_detail.map(m => m.id)
   const available = team.filter(t => !memberIds.includes(t.id))
