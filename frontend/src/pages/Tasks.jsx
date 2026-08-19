@@ -6,7 +6,7 @@ import { Bar } from 'react-chartjs-2'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
 import Directory from './Directory'
-import { ChangeRequests, CompleteModal, DeletedTasks, RequestChangeModal } from './TaskExtras'
+import { ChangeRequests, CompleteModal, DeletedTasks, RequestChangeModal, WorkloadPanel } from './TaskExtras'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
@@ -416,9 +416,18 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
   const [categories, setCategories] = useState([])
   const [inLoop, setInLoop] = useState([])          // colleague ids kept in the loop
   const [newCat, setNewCat] = useState(null)        // null = closed, '' = typing
+  const [workload, setWorkload] = useState(null)    // C1: the assignee's pipeline
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const set = k => e => setF(prev => ({ ...prev, [k]: e.target.value }))
+
+  // C1: whoever is picked, show their current pipeline (informs, never blocks)
+  useEffect(() => {
+    setWorkload(null)
+    if (!f.assigned_to) return
+    api(`/api/tasks/workload/?user=${f.assigned_to}`)
+      .then(setWorkload).catch(() => {})
+  }, [f.assigned_to])
 
   // Department first, then its categories (global + department-specific)
   useEffect(() => {
@@ -528,6 +537,11 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
               {team.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
+          {workload && (
+            <div className="wide">
+              <WorkloadPanel w={workload} />
+            </div>
+          )}
           <div>
             <label>Effort — how long should this take? *</label>
             <div style={{ display: 'flex', gap: 6 }}>

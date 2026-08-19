@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
+import { WorkloadPanel } from './TaskExtras'
+
+/* C2: fetch-on-expand workload for one team member */
+function WorkloadCell({ userId }) {
+  const [w, setW] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    api(`/api/tasks/workload/?user=${userId}`)
+      .then(setW).catch(e => setErr(errorText(e.data) || e.message))
+  }, [userId])
+  if (err) return <div className="muted small">{err}</div>
+  if (!w) return <div className="muted small">Loading workload…</div>
+  return <WorkloadPanel w={w} />
+}
 
 const ROLES = [
   ['admin', 'Admin'],
@@ -39,6 +53,7 @@ function Directory() {
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
   const [fRole, setFRole] = useState('')
+  const [wlFor, setWlFor] = useState(null)   // C2: which member's workload is open
   const [err, setErr] = useState('')
 
   useEffect(() => { api('/api/team/').then(setRows).catch(e => setErr(e.message)) }, [])
@@ -72,19 +87,32 @@ function Directory() {
       </div>
       {err && <div className="err">{err}</div>}
       <table className="table">
-        <thead><tr><th>User</th><th>Mobile</th><th>Reports To</th><th>Department</th><th>Role</th></tr></thead>
+        <thead><tr><th>User</th><th>Mobile</th><th>Reports To</th><th>Department</th><th>Role</th><th /></tr></thead>
         <tbody>
           {shown.map(u => (
-            <tr key={u.id}>
-              <td>
-                <strong>{u.name}</strong>
-                <div className="muted small">{u.email || '@' + u.username}</div>
-              </td>
-              <td>{u.mobile || '—'}</td>
-              <td>{u.reports_to || 'NA'}</td>
-              <td>{u.department_display}</td>
-              <td><span className={`role-pill role-${u.role}`}>{u.role_display}</span></td>
-            </tr>
+            <>
+              <tr key={u.id}>
+                <td>
+                  <strong>{u.name}</strong>
+                  <div className="muted small">{u.email || '@' + u.username}</div>
+                </td>
+                <td>{u.mobile || '—'}</td>
+                <td>{u.reports_to || 'NA'}</td>
+                <td>{u.department_display}</td>
+                <td><span className={`role-pill role-${u.role}`}>{u.role_display}</span></td>
+                <td>
+                  <button className="btn btn-sm" title="Open tasks & pending effort"
+                    onClick={() => setWlFor(wlFor === u.id ? null : u.id)}>
+                    {wlFor === u.id ? 'Hide' : '📊 Workload'}
+                  </button>
+                </td>
+              </tr>
+              {wlFor === u.id && (
+                <tr key={`wl-${u.id}`}>
+                  <td colSpan={6} style={{ paddingTop: 0 }}><WorkloadCell userId={u.id} /></td>
+                </tr>
+              )}
+            </>
           ))}
         </tbody>
       </table>
@@ -101,6 +129,7 @@ function ManageTeam() {
   const [q, setQ] = useState('')
   const [fRole, setFRole] = useState('')
   const [fManager, setFManager] = useState('')
+  const [wlFor, setWlFor] = useState(null)       // C2: which member's workload is open
   const [err, setErr] = useState('')
 
   const load = () => api('/api/users/?page_size=200').then(d => setRows(d.results || d)).catch(e => setErr(e.message))
@@ -152,24 +181,37 @@ function ManageTeam() {
         </thead>
         <tbody>
           {shown.map(u => (
-            <tr key={u.id} className={u.is_active ? '' : 'inactive'}>
-              <td>
-                <strong>{u.first_name || u.username} {u.last_name}</strong>
-                <div className="muted small">{u.email || '@' + u.username}</div>
-              </td>
-              <td>{u.whatsapp_phone || '—'}</td>
-              <td>{u.reporting_manager_name || 'NA'}</td>
-              <td><span className={`role-pill role-${u.role}`}>{u.role_display}</span></td>
-              <td>{u.is_active ? <span className="ok">Active</span> : <span className="off">Deactivated</span>}</td>
-              <td className="row-actions">
-                <button className="btn btn-sm" onClick={() => setEditing(u)}>Edit</button>
-                {u.id !== me.id && (
-                  <button className="btn btn-sm" onClick={() => toggleActive(u)}>
-                    {u.is_active ? 'Deactivate' : 'Activate'}
-                  </button>
-                )}
-              </td>
-            </tr>
+            <>
+              <tr key={u.id} className={u.is_active ? '' : 'inactive'}>
+                <td>
+                  <strong>{u.first_name || u.username} {u.last_name}</strong>
+                  <div className="muted small">{u.email || '@' + u.username}</div>
+                </td>
+                <td>{u.whatsapp_phone || '—'}</td>
+                <td>{u.reporting_manager_name || 'NA'}</td>
+                <td><span className={`role-pill role-${u.role}`}>{u.role_display}</span></td>
+                <td>{u.is_active ? <span className="ok">Active</span> : <span className="off">Deactivated</span>}</td>
+                <td className="row-actions">
+                  {u.is_active && (
+                    <button className="btn btn-sm" title="Open tasks & pending effort"
+                      onClick={() => setWlFor(wlFor === u.id ? null : u.id)}>
+                      {wlFor === u.id ? 'Hide' : '📊'}
+                    </button>
+                  )}
+                  <button className="btn btn-sm" onClick={() => setEditing(u)}>Edit</button>
+                  {u.id !== me.id && (
+                    <button className="btn btn-sm" onClick={() => toggleActive(u)}>
+                      {u.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                  )}
+                </td>
+              </tr>
+              {wlFor === u.id && (
+                <tr key={`wl-${u.id}`}>
+                  <td colSpan={6} style={{ paddingTop: 0 }}><WorkloadCell userId={u.id} /></td>
+                </tr>
+              )}
+            </>
           ))}
         </tbody>
       </table>

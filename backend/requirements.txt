@@ -4,5 +4,7 @@ djangorestframework-simplejwt>=5.5
 django-cors-headers>=4.6
 python-dotenv>=1.0
 requests>=2.32
-# For Neon Postgres later (not needed for local SQLite):
-# psycopg[binary]>=3.2
+# Production (Render + Neon Postgres):
+psycopg[binary]>=3.2
+gunicorn>=23.0
+whitenoise>=6.8

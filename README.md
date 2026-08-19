@@ -249,6 +249,7 @@ All under `/api/`, JWT `Authorization: Bearer <token>` unless noted.
 | `payroll-runs/{id}/payslips\|export/` | GET | `hr.manage` | month's payslips · CSV download |
 | `payslips/` | GET | own **finalised** only · `hr.manage` sees all | employee payslip history |
 | `tasks/assignees/` | GET | any | hierarchy-filtered assignee list (your level & below) |
+| `tasks/workload/?user=<id>` | GET | can-assign-to target · reporting manager · dept/all viewers | C1/C2 pipeline panel: open count, priority breakdown, pending effort, overdue, soft `overloaded` flag (≥8h or ≥10 open) — informs, never blocks |
 | `tasks/{id}/estimate/` | POST | assignee, once | counter-estimate in minutes |
 | `tasks/{id}/complete/` | POST | assignee | complete with remarks + proof file (evidence enforced) |
 | `tasks/{id}/request_change/` | GET/POST | assignee/creator/admin | raise a Modification Request |

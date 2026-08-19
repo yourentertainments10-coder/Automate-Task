@@ -7,6 +7,40 @@ const fmtDT = (iso) => iso
   : null
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']]
 
+/* ================= Workload panel (C1/C2) ================= */
+
+/** One person's live pipeline — shown when picking an assignee (C1) and in
+ *  the My Team drill-down (C2). Informs, never blocks. */
+export function WorkloadPanel({ w }) {
+  if (!w) return null
+  const pb = w.priority_breakdown || {}
+  const hot = ['urgent', 'high'].filter(p => pb[p]).map(p => `${pb[p]} ${p}`).join(', ')
+  return (
+    <div className="small" style={{
+      marginTop: 6, padding: '6px 10px', borderRadius: 6,
+      background: w.overloaded ? 'rgba(240,160,0,.12)' : 'rgba(13,122,95,.08)',
+      border: `1px solid ${w.overloaded ? 'rgba(240,160,0,.45)' : 'rgba(13,122,95,.25)'}`,
+    }}>
+      <strong>{w.name}&rsquo;s pipeline:</strong>{' '}
+      {w.open_tasks === 0 ? 'no open tasks — free right now 🎉' : (
+        <>
+          {w.open_tasks} open{hot ? ` (${hot})` : ''}
+          {w.overdue > 0 && <> · <span style={{ color: '#c0392b' }}>{w.overdue} overdue</span></>}
+          {' · '}{fmtEffort(w.pending_effort_minutes) || '0m'} of effort pending
+          {w.tasks_without_effort > 0 && (
+            <span className="muted"> (+{w.tasks_without_effort} task{w.tasks_without_effort === 1 ? '' : 's'} with no effort value)</span>
+          )}
+        </>
+      )}
+      {w.overloaded && (
+        <div style={{ color: '#9a6700', marginTop: 2 }}>
+          ⚠ Heavy pipeline — you can still assign; this warning never blocks.
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ================= Complete with evidence (B3) ================= */
 
 export function CompleteModal({ task, settings, onClose, onDone }) {

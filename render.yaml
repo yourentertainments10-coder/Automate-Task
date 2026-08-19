@@ -1,0 +1,31 @@
+# Render Blueprint — one web service serves BOTH the Django API and the
+# built React app (WhiteNoise). Connect the repo on render.com and Render
+# reads this file. DATABASE_URL is entered by hand in the dashboard (never
+# committed anywhere).
+services:
+  - type: web
+    name: cartrends-crm
+    runtime: python
+    plan: free
+    buildCommand: ./render-build.sh
+    startCommand: cd backend && gunicorn config.wsgi:application --workers 2 --threads 4 --timeout 120
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+      - key: SECRET_KEY
+        generateValue: true          # Render invents a strong key — never reuse the dev one
+      - key: DEBUG
+        value: "false"
+      - key: ALLOWED_HOSTS
+        value: cartrends-crm.onrender.com    # change if Render gives a different name
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://cartrends-crm.onrender.com
+      - key: CORS_ORIGINS
+        value: https://cartrends-crm.onrender.com
+      - key: DATABASE_URL
+        sync: false                  # paste the Neon connection string in the dashboard
+      - key: NOTIF_SCHEDULER
+        value: "true"
+      - key: TASK_ATTACHMENT_RETENTION_DAYS
+        value: "7"

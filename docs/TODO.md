@@ -104,18 +104,27 @@ to whoever assigned" = ALREADY DONE — score that point).
 - [x] **B12 · Reporting-manager visibility**: the designated reporting
       manager (My Team hierarchy) sees ALL tasks assigned to their direct
       reports, regardless of who assigned them or which department.
-- [ ] **B13 · Render deployment for UAT** — the reviewer was promised a
-      testable link "tomorrow": needs the new Neon DATABASE_URL, render.yaml,
-      DEBUG=false/ALLOWED_HOSTS pass (subset of Phase 10, pulled forward).
+- [~] **B13 · Render deployment for UAT** — prepped 19 Aug (see
+      `docs/DEPLOY.md`): Neon migrated + local data copied over,
+      render.yaml/build script/WhiteNoise/SPA-serving/security settings all
+      in place, .env & db.sqlite3 untracked from git. REMAINING: Anuj
+      pushes to GitHub + connects the repo as a Render Blueprint + pastes
+      DATABASE_URL in the dashboard.
 - [ ] *(parked)* "All Apps" ERP-style launcher — discussed, not committed.
 
 ## Phase C — Workload-aware assigning
 
-- [ ] **C1 · Assignee workload panel at assignment time.** When you pick an
+- [x] **C1 · Assignee workload panel at assignment time.** When you pick an
       assignee in the task form: their open-task count, priority breakdown,
       and **pending effort hours** ("your pipeline shows 15 hours pending").
-      Soft warning when they're overloaded — informs, never blocks.
-- [ ] **C2 · Same panel in the employee drill-down** (Team/dashboard views).
+      Soft warning when they're overloaded (≥ 8h pending effort or ≥ 10 open
+      tasks) — informs, never blocks. `GET /api/tasks/workload/?user=<id>`;
+      visible to anyone who could assign to that person, their reporting
+      manager, and dept/all viewers. Tasks without an effort value are
+      counted separately ("+N with no effort value") so assigners learn.
+- [x] **C2 · Same panel in the employee drill-down** — 📊 Workload button on
+      every My Team row (both the read-only directory and the admin manage
+      view), expands the same panel inline, fetch-on-click.
 
 ## Phase D — Time Earned, scoring & reports
 
