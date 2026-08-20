@@ -303,6 +303,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         if updated.status == TaskStatus.DONE and old_status != TaskStatus.DONE:
             updated.completed_at = timezone.now()
             updated.save(update_fields=["completed_at"])
+            self._sync_linked_mistake(updated, user)
             if updated.lead:
                 LeadEvent.objects.create(
                     lead=updated.lead, type=EventType.NOTE, actor=user,
@@ -317,6 +318,22 @@ class TaskViewSet(viewsets.ModelViewSet):
             _notify_task_assigned(updated, user)
         if was_admin_edit and user.pk not in (updated.assigned_to_id, updated.created_by_id):
             act(updated, user, "Edited directly by admin")
+
+    def _sync_linked_mistake(self, task, user):
+        """A completed corrective task updates its mistake automatically
+        (Sir's task-integration rule). Lazy import — mistakes imports crm."""
+        from mistakes.models import Mistake
+        from mistakes.views import log as mlog
+        mistake = Mistake.objects.filter(corrective_task=task).select_related("manager").first()
+        if not mistake:
+            return
+        mlog(mistake, user, f"Corrective task {task.code} completed"
+             + (f": {task.completion_note[:150]}" if task.completion_note else ""))
+        if mistake.manager and mistake.manager.pk != user.pk:
+            notify(mistake.manager, "mistake_update",
+                   f"{mistake.code}: corrective task done",
+                   f"{task.code} {task.title} — review and resolve the mistake.",
+                   link="/mistakes")
 
     def perform_destroy(self, instance):
         """A4: admin-only, and SOFT -- the task lands in the Deleted bin."""

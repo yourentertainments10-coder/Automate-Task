@@ -30,6 +30,7 @@ urlpatterns = [
     path("api/", include("hr.urls")),
     path("api/", include("directory.urls")),
     path("api/", include("payroll.urls")),
+    path("api/", include("mistakes.urls")),
     # uploaded files (works in dev and on Render; Render's disk is ephemeral)
     re_path(r"^media/(?P<path>.*)$", _serve, {"document_root": settings.MEDIA_ROOT}),
     # everything else that isn't API/admin/static -> the React app

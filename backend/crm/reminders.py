@@ -84,4 +84,6 @@ def send_followup_reminders() -> int:
         sent += 1
     sent += send_task_reminders()
     purge_expired_attachments()
+    from mistakes.sla import escalate_overdue_mistakes  # lazy: avoids app-load cycles
+    escalate_overdue_mistakes()
     return sent
