@@ -126,10 +126,12 @@ class TaskSerializer(serializers.ModelSerializer):
             "assigned_to", "assigned_to_detail", "created_by_detail",
             "status", "status_display", "priority", "priority_display",
             "due_at", "is_overdue", "effort_minutes", "assignee_estimate_minutes",
+            "progress_percent", "actual_minutes",
             "completion_note", "completed_at", "deleted_at", "subscribed",
             "pending_change_requests", "created_at", "updated_at",
         ]
-        read_only_fields = ["assignee_estimate_minutes", "completion_note",
+        read_only_fields = ["assignee_estimate_minutes", "progress_percent",
+                            "actual_minutes", "completion_note",
                             "completed_at", "deleted_at", "created_at", "updated_at"]
 
     def get_pending_change_requests(self, obj):

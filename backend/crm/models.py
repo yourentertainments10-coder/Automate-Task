@@ -204,6 +204,11 @@ class Task(models.Model):
     # The assignee's one-time counter-estimate ("Amit says 1h, Bhavna says 4h").
     # Never overwrites the assigner's value; both feed the review reports.
     assignee_estimate_minutes = models.PositiveIntegerField(null=True, blank=True)
+    # P1: latest self-reported "% work done" (status updates, repeatable)
+    progress_percent = models.PositiveSmallIntegerField(null=True, blank=True)
+    # P2: TOTAL effort actually spent, entered by the assignee (running total
+    # via status updates, finalized at completion) -- feeds Time Spent report
+    actual_minutes = models.PositiveIntegerField(null=True, blank=True)
     # Evidence captured when completing (Task Settings can make it mandatory)
     completion_note = models.CharField(max_length=500, blank=True, default="")
     # Soft delete: tasks land in the Deleted bin, recoverable by admin

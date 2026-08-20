@@ -251,7 +251,9 @@ All under `/api/`, JWT `Authorization: Bearer <token>` unless noted.
 | `tasks/assignees/` | GET | any | hierarchy-filtered assignee list (your level & below) |
 | `tasks/workload/?user=<id>` | GET | can-assign-to target · reporting manager · dept/all viewers | C1/C2 pipeline panel: open count, priority breakdown, pending effort, overdue, soft `overloaded` flag (≥8h or ≥10 open) — informs, never blocks |
 | `tasks/{id}/estimate/` | POST | assignee, once | counter-estimate in minutes |
-| `tasks/{id}/complete/` | POST | assignee | complete with remarks + proof file (evidence enforced) |
+| `tasks/{id}/progress/` | POST | assignee | repeatable status update: % done, effort spent so far, comment — logs to activity, notifies creator |
+| `tasks/{id}/complete/` | POST | assignee | complete: description + actual effort spent MANDATORY, proof file per settings |
+| `tasks/time_report/?range=` | GET | self · dept (manager) · all (admin) | Time Earned (assigned effort) vs Time Spent (actual) per person |
 | `tasks/{id}/request_change/` | GET/POST | assignee/creator/admin | raise a Modification Request |
 | `tasks/{id}/restore/` · `?scope=deleted` | POST · GET | admin | Deleted-bin restore · listing |
 | `tasks/{id}/files/` | GET | visible | task attachments |

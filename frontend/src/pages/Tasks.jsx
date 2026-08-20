@@ -6,7 +6,7 @@ import { Bar } from 'react-chartjs-2'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
 import Directory from './Directory'
-import { ChangeRequests, CompleteModal, DeletedTasks, RequestChangeModal, WorkloadPanel } from './TaskExtras'
+import { ChangeRequests, CompleteModal, DeletedTasks, ProgressModal, RequestChangeModal, WorkloadPanel } from './TaskExtras'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
@@ -64,7 +64,7 @@ export default function Tasks() {
     ['subscribed', 'Subscribed'],
     ['requests', inboxCount > 0 ? `Requests (${inboxCount})` : 'Requests'],
     ['templates', 'Templates'], ['directory', 'Template Directory'],
-    ['activities', 'Activities'],
+    ['activities', 'Activities'], ['time', 'Time Report'],
     ...(isAdmin ? [['deleted', 'Deleted']] : []),
   ]
 
@@ -85,6 +85,7 @@ export default function Tasks() {
       {area === 'templates' && <Templates onUse={useTemplate} />}
       {area === 'directory' && <Directory />}
       {area === 'activities' && <Activities />}
+      {area === 'time' && <TimeReport />}
       {area === 'deleted' && <DeletedTasks />}
     </div>
   )
@@ -228,6 +229,7 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
   const [onlyRecurring, setOnlyRecurring] = useState(false)
   const [showAdd, setShowAdd] = useState(!!prefill)
   const [completing, setCompleting] = useState(null)   // task in the evidence modal
+  const [progressFor, setProgressFor] = useState(null) // task in the status-update modal (P1)
   const [requestFor, setRequestFor] = useState(null)   // task in the request-change modal
 
   const load = useCallback(() => {
@@ -247,7 +249,10 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
   const needsEvidence = settings.require_completion_remarks || settings.require_completion_attachment
 
   const setStatus = async (t, status) => {
-    if (status === 'done' && needsEvidence) { setCompleting(t); return }
+    // P2: completing ALWAYS collects description + actual effort spent
+    if (status === 'done') { setCompleting(t); return }
+    // P1: picking "In Progress" opens the status-update form
+    if (status === 'in_progress') { setProgressFor(t); return }
     setErr('')
     try { await api(`/api/tasks/${t.id}/`, { method: 'PATCH', body: { status } }); load() }
     catch (e) {
@@ -327,6 +332,15 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
                 )}
                 {t.priority !== 'normal' && <span className={`prio prio-${t.priority}`}>{t.priority_display}</span>}
                 {t.effort_minutes && <span className="ai-chip" title="Effort set by the assigner">⏱ {fmtEffort(t.effort_minutes)}</span>}
+                {t.status === 'in_progress' && t.progress_percent != null && (
+                  <span className="ai-chip" title="Latest status update">▰ {t.progress_percent}%</span>
+                )}
+                {t.status !== 'done' && t.actual_minutes && (
+                  <span className="ai-chip" title="Effort spent so far (self-reported)">⏲ {fmtEffort(t.actual_minutes)} spent</span>
+                )}
+                {t.status === 'done' && t.actual_minutes && (
+                  <span className="ai-chip" title="Actual effort spent vs assigned">⏲ took {fmtEffort(t.actual_minutes)}</span>
+                )}
                 {t.assignee_estimate_minutes && (
                   <span className="ai-chip est" title="Assignee's own estimate">
                     est. {fmtEffort(t.assignee_estimate_minutes)}
@@ -365,10 +379,14 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
               title={t.subscribed ? 'Unfollow' : 'Follow this task'}
               onClick={() => toggleSub(t)}
             >🔔</button>
+            {t.status === 'in_progress' && t.assigned_to === user.id && (
+              <button className="btn btn-sm" title="Add another status update (% done, effort, comment)"
+                onClick={() => setProgressFor(t)}>+ update</button>
+            )}
             {t.status !== 'done' && t.assigned_to === user.id && (
               <select value={t.status} onChange={e => setStatus(t, e.target.value)}>
                 <option value="open">Open</option>
-                <option value="in_progress">In Progress</option>
+                <option value="in_progress">In Progress — Status Update</option>
                 <option value="done">Done</option>
               </select>
             )}
@@ -380,6 +398,11 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
         <CompleteModal task={completing} settings={settings}
           onClose={() => setCompleting(null)}
           onDone={() => { setCompleting(null); load() }} />
+      )}
+      {progressFor && (
+        <ProgressModal task={progressFor}
+          onClose={() => setProgressFor(null)}
+          onDone={() => { setProgressFor(null); load() }} />
       )}
       {requestFor && (
         <RequestChangeModal task={requestFor} team={team} user={user}
@@ -781,6 +804,73 @@ function Activities() {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+/* ================= Time Report (P3) ================= */
+
+const TIME_RANGES = [
+  ['today', 'Today'], ['this_week', 'This Week'],
+  ['this_month', 'This Month'], ['this_year', 'This Year'], ['all', 'All Time'],
+]
+
+function TimeReport() {
+  const [range, setRange] = useState('this_month')
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    api(`/api/tasks/time_report/?range=${range}`)
+      .then(setData).catch(e => setErr(errorText(e.data) || e.message))
+  }, [range])
+
+  if (err) return <div className="err">{err}</div>
+  if (!data) return <div className="center-note">Loading…</div>
+  return (
+    <div style={{ maxWidth: 760 }}>
+      <div className="filters">
+        <div className="seg">
+          {TIME_RANGES.map(([v, l]) => (
+            <button key={v} className={'seg-btn' + (range === v ? ' on' : '')}
+              onClick={() => setRange(v)}>{l}</button>
+          ))}
+        </div>
+      </div>
+      <p className="muted small">
+        <strong>Time Earned</strong> = the assigner&rsquo;s task time, credited when the
+        task completes. <strong>Time Spent</strong> = the actual effort the person
+        reported. A big gap either way is a conversation, not a verdict.
+      </p>
+      {data.rows.length === 0 && <p className="muted">No completed tasks in this period.</p>}
+      {data.rows.length > 0 && (
+        <table className="table">
+          <thead>
+            <tr><th>Person</th><th>Done</th><th>Time Earned</th><th>Time Spent</th><th>Difference</th></tr>
+          </thead>
+          <tbody>
+            {data.rows.map(r => {
+              const diff = r.time_spent_minutes - r.time_earned_minutes
+              return (
+                <tr key={r.user}>
+                  <td><strong>{r.name}</strong>
+                    {r.no_effort_tasks > 0 && (
+                      <div className="muted small">{r.no_effort_tasks} task{r.no_effort_tasks === 1 ? '' : 's'} had no effort value — earned 0</div>
+                    )}
+                  </td>
+                  <td>{r.done}</td>
+                  <td>{fmtEffort(r.time_earned_minutes) || '0m'}</td>
+                  <td>{fmtEffort(r.time_spent_minutes) || '0m'}</td>
+                  <td className={diff > 0 ? 'late' : ''}>
+                    {diff === 0 ? '—' : (diff > 0 ? '+' : '−') + fmtEffort(Math.abs(diff))}
+                    {diff > 0 ? ' over' : diff < 0 ? ' under' : ''}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }

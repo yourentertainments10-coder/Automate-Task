@@ -94,7 +94,8 @@ class TaskApiTests(TaskBase):
         t = Task.objects.create(title="Call", assigned_to=self.rahul, created_by=self.manager,
                                 lead=self.lead)
         self.as_(self.rahul)
-        res = self.client.patch(f"/api/tasks/{t.id}/", {"status": "done"})
+        res = self.client.post(f"/api/tasks/{t.id}/complete/",
+                               {"remarks": "called him", "actual_minutes": 15}, format="json")
         self.assertEqual(res.status_code, 200)
         t.refresh_from_db()
         self.assertIsNotNone(t.completed_at)

@@ -122,7 +122,8 @@ class RecurrenceTests(Base):
         t = Task.objects.create(title="Weekly report", assigned_to=self.rahul,
                                 frequency="weekly", due_at=due)
         self.as_(self.rahul)
-        self.client.patch(f"/api/tasks/{t.id}/", {"status": "done"})
+        self.client.post(f"/api/tasks/{t.id}/complete/",
+                         {"remarks": "sent", "actual_minutes": 30}, format="json")
         nxt = Task.objects.exclude(pk=t.pk).get(title="Weekly report")
         self.assertEqual(nxt.status, "open")
         self.assertEqual((nxt.due_at - due).days, 7)
@@ -131,7 +132,8 @@ class RecurrenceTests(Base):
         t = Task.objects.create(title="Once", assigned_to=self.rahul,
                                 due_at=timezone.now())
         self.as_(self.rahul)
-        self.client.patch(f"/api/tasks/{t.id}/", {"status": "done"})
+        self.client.post(f"/api/tasks/{t.id}/complete/",
+                         {"remarks": "done", "actual_minutes": 5}, format="json")
         self.assertEqual(Task.objects.filter(title="Once").count(), 1)
 
 

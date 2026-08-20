@@ -186,6 +186,65 @@ to whoever assigned" = ALREADY DONE — score that point).
 - [ ] **F2 · Task Settings screen** housing B3's evidence toggles + future
       org-wide task policies.
 
+## Phase P — Progress updates & Time Spent (20 Aug requirements doc, part 1)
+
+- [x] **P1 · In-Progress status update pop-up**: picking "In Progress —
+      Status Update" opens a form — % work done, effort spent so far,
+      comments (ALL optional, send at least one). Repeatable ("+ update"
+      button); every update logs to the activity history + notifies the
+      creator. Task stores `progress_percent`; rows show ▰ % and ⏲ spent
+      chips (Delegated view included). `POST /api/tasks/{id}/progress/`.
+- [x] **P2 · Done flow v2**: completion description now MANDATORY on every
+      completion (plain status-PATCH answers 400 so the UI opens the
+      modal); modal shows the assigner's Task Time read-only + requires
+      actual **Total Effort Spent** → `actual_minutes` on Task,
+      progress set to 100.
+- [x] **P3 · Time Report tab**: Time Earned (assigned effort credited on
+      completion) vs Time Spent (actual minutes) per person with range
+      presets; tasks with no effort value shown separately (earn 0).
+      `GET /api/tasks/time_report/?range=` — employee sees self, manager
+      dept + reports, admin all. (Merges into D1 scoring later.)
+- [x] **P4 · Edit request with new time + reason** — already live (B2/B9:
+      TaskChangeRequest with effort_minutes + escalate).
+
+## Phase M — Mistake Register & Accountability Engine (20 Aug doc, part 2)
+
+Sir's spec: convert the app into Mistake + Accountability + Escalation +
+Performance management. Employee owns the mistake → Manager owns the
+correction → Dept Head owns repeats → Founder sees only serious escalations.
+
+- [ ] **M1 · Register core** (~3-4 days): `Mistake` model (employee, dept,
+      manager, linked task/lead, category, severity, classification —
+      Human/Process/System/Management/External, impact + financial loss,
+      root cause, corrective + preventive action, due date, evidence file,
+      explanation, manager remarks, status) + `MistakeEvent` full audit
+      trail + CRUD APIs with role-scoped visibility + auto-create
+      correction/audit task (completing it updates the mistake) + notify()
+      fan-out + employee/manager list views.
+- [ ] **M2 · Repeat detection + 3-level flow + SLA escalation** (~2-3 days):
+      occurrence levels (1: explain+correct, manager reviews; 2: Repeat
+      Error — root cause + CAPA mandatory, manager accountable; 3:
+      Performance Escalation to dept head; discipline stays human-approved).
+      Rule-based similarity first (same employee + category + process/SKU
+      keywords) with MANAGER CONFIRMATION before marking repeat; escalation
+      path = reporting_manager chain (employee → TL/manager → dept head →
+      admin/founder). SLA deadlines by severity (Low 72h / Med 48h / High
+      24h / Critical 4h) checked by the existing reminder ticker; missed
+      SLA auto-escalates one level up.
+- [ ] **M3 · AI layer + founder view** (~2 days): Claude (env-gated,
+      existing AI_ENABLED pattern, rule-based fallback) classifies mistake
+      type, spots cross-employee patterns ("5 people made this → question
+      the process, not the people"), suggests CAPA; Founder dashboard =
+      Action Required only (critical, big financial impact, overdue
+      escalations, recurring failures) + concise weekly digest; managers
+      get a daily accountability summary.
+- [ ] **M4 · Scoring** (~2 days, merges with Phase D): employee score adds
+      mistake frequency/repeats/severity/action completion/improvement;
+      department accountability score (repeats, SLA compliance, financial
+      impact, improvement).
+- **Blocked on Sir:** who are the Department Heads (needed for the
+  escalation chain) + the mistake category list + confirm SLA hours.
+
 ## Decisions to confirm with Sir before/while building
 1. **Modification-request approver routing** — the reconciled rule in B2
    (assignee→creator approves; creator→admin approves; admin sees all).

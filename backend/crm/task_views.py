@@ -285,11 +285,13 @@ class TaskViewSet(viewsets.ModelViewSet):
         self._after_status_change(updated, user, old_status, old_assignee, is_admin)
 
     def _enforce_completion_evidence(self, task, remarks="", has_new_file=False):
-        cfg = TaskSettings.get()
-        if cfg.require_completion_remarks and not remarks:
+        # P2: a completion description is ALWAYS required now (reviewer's
+        # rule) -- the settings toggle only governs the proof attachment.
+        if not remarks:
             raise ValidationError({
-                "detail": "Completion remarks are required — say what was done.",
+                "detail": "A completion description is required — say what was done.",
                 "needs": "remarks"})
+        cfg = TaskSettings.get()
         if cfg.require_completion_attachment and not has_new_file and not task.attachments.exists():
             raise ValidationError({
                 "detail": "A proof attachment (file/photo) is required to complete this task.",
@@ -411,6 +413,112 @@ class TaskViewSet(viewsets.ModelViewSet):
         return Response(TaskSerializer(task, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])
+    def progress(self, request, pk=None):
+        """P1: repeatable 'In Progress — Status Update'. % work done, total
+        effort spent so far, comment — each optional (but send at least one).
+        Everything lands in the task's activity history."""
+        task = self.get_object()
+        if task.assigned_to_id != request.user.id:
+            raise PermissionDenied("Only the assignee can post a status update.")
+        if task.status == TaskStatus.DONE:
+            raise ValidationError({"detail": "This task is already completed."})
+        if task.deleted_at:
+            raise ValidationError({"detail": "This task is deleted."})
+
+        updates = []
+        percent = request.data.get("percent")
+        if percent not in (None, ""):
+            try:
+                percent = int(percent)
+                if not 0 <= percent <= 100:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise ValidationError({"percent": "% work done must be between 0 and 100."})
+            task.progress_percent = percent
+            updates.append(f"{percent}% done")
+        spent = request.data.get("spent_minutes")
+        if spent not in (None, ""):
+            try:
+                spent = int(spent)
+                if not 1 <= spent <= 60 * 24 * 90:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise ValidationError({"spent_minutes": "Effort spent must be a positive number of minutes."})
+            task.actual_minutes = spent          # running total so far
+            updates.append(f"{spent}m spent so far")
+        comment = str(request.data.get("comment", "")).strip()
+        if comment:
+            updates.append(f"“{comment[:200]}”")
+        if not updates:
+            raise ValidationError({"detail": "Nothing to update — add a %, effort spent, or a comment."})
+
+        old_status = task.status
+        if task.status == TaskStatus.OPEN:
+            task.status = TaskStatus.IN_PROGRESS
+        task.save(update_fields=["progress_percent", "actual_minutes", "status"])
+        act(task, request.user, "Status update: " + " · ".join(updates))
+        if old_status != task.status:
+            act(task, request.user, f"Status: {old_status} -> {task.status}")
+        # the person who delegated it sees progress without asking
+        if task.created_by_id and task.created_by_id != request.user.id \
+                and task.created_by.is_active:
+            notify(task.created_by, "task_progress",
+                   f"{task.code} — {' · '.join(updates)}"[:200], task.title, link="/tasks")
+        return Response(TaskSerializer(task, context={"request": request}).data)
+
+    @action(detail=False, methods=["get"])
+    def time_report(self, request):
+        """P3: per person over ?range= — Time Earned (assigned effort
+        credited when the task completes) vs Time Spent (actual minutes the
+        assignee reported). Employees see themselves; managers their
+        department + reports; admin everyone."""
+        user = request.user
+        now = timezone.localtime()
+        today = now.date()
+        rng = request.query_params.get("range", "this_month")
+        starts = {
+            "today": today,
+            "this_week": today - timedelta(days=today.weekday()),
+            "this_month": today.replace(day=1),
+            "this_year": today.replace(month=1, day=1),
+            "all": None,
+        }
+        if rng not in starts:
+            raise ValidationError({"range": f"Use one of: {', '.join(starts)}."})
+
+        qs = Task.objects.filter(status=TaskStatus.DONE, deleted_at__isnull=True,
+                                 completed_at__isnull=False)
+        if starts[rng]:
+            qs = qs.filter(completed_at__date__gte=starts[rng])
+        if has_capability(user, "tasks.view_all"):
+            pass
+        elif has_capability(user, "tasks.view_department"):
+            from django.db.models import Q as _Q
+            qs = qs.filter(_Q(assigned_to__department=user.department)
+                           | _Q(assigned_to__reporting_manager=user)
+                           | _Q(assigned_to=user))
+        else:
+            qs = qs.filter(assigned_to=user)
+
+        people = {}
+        for assignee_id, name, username, effort, actual in qs.values_list(
+                "assigned_to_id", "assigned_to__first_name",
+                "assigned_to__username", "effort_minutes", "actual_minutes"):
+            row = people.setdefault(assignee_id, {
+                "user": assignee_id, "name": name or username,
+                "done": 0, "time_earned_minutes": 0, "time_spent_minutes": 0,
+                "no_effort_tasks": 0,
+            })
+            row["done"] += 1
+            if effort:
+                row["time_earned_minutes"] += effort
+            else:
+                row["no_effort_tasks"] += 1   # visible, so assigners learn
+            row["time_spent_minutes"] += actual or 0
+        rows = sorted(people.values(), key=lambda r: -r["time_earned_minutes"])
+        return Response({"range": rng, "rows": rows})
+
+    @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
         """B3: complete WITH evidence (remarks and/or a proof file), used when
         Task Settings demand it. Plain status PATCH still works when nothing
@@ -425,6 +533,16 @@ class TaskViewSet(viewsets.ModelViewSet):
         if file and file.size > 10 * 1024 * 1024:
             raise ValidationError({"file": "File exceeds 10 MB."})
         self._enforce_completion_evidence(task, remarks=remarks, has_new_file=bool(file))
+        # P2: the actual TOTAL effort spent is mandatory at completion --
+        # it powers the Time Spent report next to Time Earned.
+        try:
+            actual = int(request.data.get("actual_minutes"))
+            if not 1 <= actual <= 60 * 24 * 90:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValidationError({
+                "actual_minutes": "Enter the total effort actually spent (in minutes).",
+                "needs": "actual_minutes"})
 
         if file:
             TaskAttachment.objects.create(task=task, file=file, filename=file.name,
@@ -432,9 +550,12 @@ class TaskViewSet(viewsets.ModelViewSet):
         old_status = task.status
         task.status = TaskStatus.DONE
         task.completion_note = remarks[:500]
-        task.save(update_fields=["status", "completion_note"])
-        if remarks:
-            act(task, request.user, f"Completed with remarks: {remarks[:200]}")
+        task.actual_minutes = actual
+        task.progress_percent = 100
+        task.save(update_fields=["status", "completion_note", "actual_minutes", "progress_percent"])
+        assigned_view = f"{task.effort_minutes}m" if task.effort_minutes else "not set"
+        act(task, request.user,
+            f"Completed — took {actual}m (assigned: {assigned_view}): {remarks[:180]}")
         if file:
             act(task, request.user, f"Completion proof attached: {file.name}")
         self._after_status_change(task, request.user, old_status, task.assigned_to)

@@ -122,7 +122,8 @@ class RecurrenceEndTests(Base):
             frequency="daily", due_at=due,
             repeat_until=timezone.localtime(due).date())      # ends TODAY
         self.as_(self.rahul)
-        self.client.patch(f"/api/tasks/{task.id}/", {"status": "done"}, format="json")
+        self.client.post(f"/api/tasks/{task.id}/complete/",
+                         {"remarks": "done for today", "actual_minutes": 20}, format="json")
         self.assertEqual(Task.objects.filter(title="Daily report").count(), 1)  # no next
 
     def test_recurrence_continues_within_end_date(self):
@@ -132,10 +133,12 @@ class RecurrenceEndTests(Base):
             frequency="daily", due_at=due, effort_minutes=30,
             repeat_until=(timezone.localtime(due) + timedelta(days=5)).date())
         self.as_(self.rahul)
-        self.client.patch(f"/api/tasks/{task.id}/", {"status": "done"}, format="json")
+        self.client.post(f"/api/tasks/{task.id}/complete/",
+                         {"remarks": "done for today", "actual_minutes": 20}, format="json")
         nxt = Task.objects.filter(title="Daily report").exclude(pk=task.pk).get()
         self.assertEqual(nxt.effort_minutes, 30)               # effort carries over
         self.assertEqual(nxt.repeat_until, task.repeat_until)
+        self.assertIsNone(nxt.actual_minutes)                  # fresh occurrence, fresh clock
 
 
 class SoftDeleteTests(Base):
@@ -329,33 +332,40 @@ class CompletionEvidenceTests(Base):
         cfg.require_completion_attachment = attachment
         cfg.save()
 
-    def test_no_policy_plain_tick_still_works(self):
-        self.as_(self.rahul)
-        res = self.client.patch(f"/api/tasks/{self.task.id}/", {"status": "done"}, format="json")
-        self.assertEqual(res.status_code, 200)
-
-    def test_remarks_required_blocks_plain_tick(self):
-        self.set_policy(remarks=True)
+    def test_plain_tick_always_asks_for_description_now(self):
+        # P2: description is mandatory on EVERY completion — the plain PATCH
+        # path answers 400 so the UI opens the completion modal.
         self.as_(self.rahul)
         res = self.client.patch(f"/api/tasks/{self.task.id}/", {"status": "done"}, format="json")
         self.assertEqual(res.status_code, 400)
         self.assertEqual(res.data.get("needs"), "remarks")
-        # the complete action WITH remarks succeeds and stores the note
+
+    def test_complete_needs_description_and_actual_minutes(self):
+        self.as_(self.rahul)
+        # description alone is not enough — actual effort spent is mandatory
         res = self.client.post(f"/api/tasks/{self.task.id}/complete/",
                                {"remarks": "Filled and delivered the bottle"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data.get("needs"), "actual_minutes")
+        res = self.client.post(f"/api/tasks/{self.task.id}/complete/",
+                               {"remarks": "Filled and delivered the bottle",
+                                "actual_minutes": 45}, format="json")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["completion_note"], "Filled and delivered the bottle")
+        self.assertEqual(res.data["actual_minutes"], 45)
+        self.assertEqual(res.data["progress_percent"], 100)
 
     def test_attachment_required(self):
         self.set_policy(attachment=True)
         self.as_(self.rahul)
         res = self.client.post(f"/api/tasks/{self.task.id}/complete/",
-                               {"remarks": "done"}, format="json")
+                               {"remarks": "done", "actual_minutes": 10}, format="json")
         self.assertEqual(res.status_code, 400)
         self.assertEqual(res.data.get("needs"), "attachment")
         res = self.client.post(
             f"/api/tasks/{self.task.id}/complete/",
-            {"remarks": "done", "file": SimpleUploadedFile("proof.jpg", b"jpegbytes")},
+            {"remarks": "done", "actual_minutes": 10,
+             "file": SimpleUploadedFile("proof.jpg", b"jpegbytes")},
             format="multipart")
         self.assertEqual(res.status_code, 200)
         files = self.client.get(f"/api/tasks/{self.task.id}/files/").data

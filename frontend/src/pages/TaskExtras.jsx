@@ -45,6 +45,8 @@ export function WorkloadPanel({ w }) {
 
 export function CompleteModal({ task, settings, onClose, onDone }) {
   const [remarks, setRemarks] = useState('')
+  const [actual, setActual] = useState(task.actual_minutes ? String(task.actual_minutes) : '')
+  const [unit, setUnit] = useState('minutes')
   const [file, setFile] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -55,6 +57,8 @@ export function CompleteModal({ task, settings, onClose, onDone }) {
     try {
       const fd = new FormData()
       fd.append('remarks', remarks)
+      fd.append('actual_minutes',
+        String(Math.round(Number(actual) * (unit === 'hours' ? 60 : 1))))
       if (file) fd.append('file', file)
       await apiUpload(`/api/tasks/${task.id}/complete/`, fd)
       onDone()
@@ -69,10 +73,25 @@ export function CompleteModal({ task, settings, onClose, onDone }) {
         <p className="muted small">{task.title}</p>
         <div className="form-grid">
           <div className="wide">
-            <label>What was done? {settings.require_completion_remarks ? '*' : '(optional)'}</label>
+            <label>What was done? *</label>
             <textarea rows={3} value={remarks} onChange={e => setRemarks(e.target.value)}
               style={{ width: '100%', border: '1px solid var(--line)', borderRadius: 9, padding: '9px 11px' }}
               placeholder="e.g. Delivered the quotation and confirmed on call" />
+          </div>
+          <div>
+            <label>Assigned task time</label>
+            <input value={task.effort_minutes ? fmtEffort(task.effort_minutes) : 'not set'} disabled />
+          </div>
+          <div>
+            <label>Total effort YOU spent *</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input type="number" min="1" value={actual} onChange={e => setActual(e.target.value)}
+                required placeholder="e.g. 60" style={{ flex: 1 }} />
+              <select value={unit} onChange={e => setUnit(e.target.value)} style={{ width: 90 }}>
+                <option value="minutes">min</option>
+                <option value="hours">hours</option>
+              </select>
+            </div>
           </div>
           <div className="wide">
             <label>Proof file / photo {settings.require_completion_attachment ? '*' : '(optional)'}</label>
@@ -82,10 +101,79 @@ export function CompleteModal({ task, settings, onClose, onDone }) {
         {err && <div className="err">{err}</div>}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={busy
-            || (settings.require_completion_remarks && !remarks.trim())
+          <button className="btn btn-primary" disabled={busy || !remarks.trim() || !actual
             || (settings.require_completion_attachment && !file)}>
             {busy ? 'Saving…' : 'Complete task'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+/* ================= In Progress — Status Update (P1) ================= */
+
+export function ProgressModal({ task, onClose, onDone }) {
+  const [percent, setPercent] = useState(task.progress_percent != null ? String(task.progress_percent) : '')
+  const [spent, setSpent] = useState(task.actual_minutes ? String(task.actual_minutes) : '')
+  const [unit, setUnit] = useState('minutes')
+  const [comment, setComment] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setErr(''); setBusy(true)
+    const body = {}
+    if (percent !== '') body.percent = Number(percent)
+    if (spent !== '') body.spent_minutes = Math.round(Number(spent) * (unit === 'hours' ? 60 : 1))
+    if (comment.trim()) body.comment = comment.trim()
+    try {
+      await api(`/api/tasks/${task.id}/progress/`, { method: 'POST', body })
+      onDone()
+    } catch (ex) { setErr(errorText(ex.data) || ex.message) }
+    finally { setBusy(false) }
+  }
+
+  const nothing = percent === '' && spent === '' && !comment.trim()
+  return (
+    <div className="modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <form className="modal-card" onSubmit={submit}>
+        <h2>Status update — {task.code}</h2>
+        <p className="muted small">
+          {task.title} · every field is optional, add what you know. You can
+          post updates as many times as you like; all of them stay in the
+          task history.
+        </p>
+        <div className="form-grid">
+          <div>
+            <label>% work done</label>
+            <input type="number" min="0" max="100" value={percent}
+              onChange={e => setPercent(e.target.value)} placeholder="e.g. 60" />
+          </div>
+          <div>
+            <label>Total effort spent so far</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input type="number" min="1" value={spent} onChange={e => setSpent(e.target.value)}
+                placeholder="e.g. 45" style={{ flex: 1 }} />
+              <select value={unit} onChange={e => setUnit(e.target.value)} style={{ width: 90 }}>
+                <option value="minutes">min</option>
+                <option value="hours">hours</option>
+              </select>
+            </div>
+          </div>
+          <div className="wide">
+            <label>Comments</label>
+            <textarea rows={2} value={comment} onChange={e => setComment(e.target.value)}
+              style={{ width: '100%', border: '1px solid var(--line)', borderRadius: 9, padding: '9px 11px' }}
+              placeholder="e.g. waiting on vendor confirmation" />
+          </div>
+        </div>
+        {err && <div className="err">{err}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={busy || nothing}>
+            {busy ? 'Saving…' : 'Post update'}
           </button>
         </div>
       </form>
