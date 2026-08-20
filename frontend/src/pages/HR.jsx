@@ -19,7 +19,7 @@ export default function HR() {
   const [tab, setTab] = useState('today')
   const tabs = [
     ['today', 'Today'], ['history', 'My Attendance'], ['leave', 'My Leave'],
-    ['salary', 'My Salary'],
+    ['salary', 'My Salary'], ['holidays', 'Holidays'],
     ...(can('hr.approve') ? [['team', 'Team'], ['approvals', 'Approvals']] : []),
     ...(can('hr.manage') ? [['payroll', 'Payroll'], ['settings', 'HR Settings']] : []),
   ]
@@ -35,10 +35,60 @@ export default function HR() {
       {tab === 'history' && <MyAttendance />}
       {tab === 'leave' && <MyLeave />}
       {tab === 'salary' && <MySalary />}
+      {tab === 'holidays' && <Holidays />}
       {tab === 'payroll' && <PayrollAdmin />}
       {tab === 'team' && <TeamToday />}
       {tab === 'approvals' && <Approvals />}
       {tab === 'settings' && <HRSettings />}
+    </div>
+  )
+}
+
+/* ---------------- Holidays (moved here from Tasks — reviewer ask) ------- */
+
+function Holidays() {
+  const { can } = useAuth()
+  const canManage = can('settings.manage')
+  const [rows, setRows] = useState([])
+  const [err, setErr] = useState('')
+  const [f, setF] = useState({ name: '', date: '' })
+
+  const load = () => api('/api/holidays/').then(setRows).catch(e => setErr(e.message))
+  useEffect(() => { load() }, [])
+
+  const add = async () => {
+    setErr('')
+    try { await api('/api/holidays/', { method: 'POST', body: f }); setF({ name: '', date: '' }); load() }
+    catch (e) { setErr(errorText(e.data) || e.message) }
+  }
+  const remove = async (h) => {
+    try { await api(`/api/holidays/${h.id}/`, { method: 'DELETE' }); load() }
+    catch (e) { setErr(errorText(e.data) || e.message) }
+  }
+
+  return (
+    <div>
+      {canManage && (
+        <div className="filters">
+          <input placeholder="Holiday name" value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} />
+          <input type="date" value={f.date} onChange={e => setF(p => ({ ...p, date: e.target.value }))} />
+          <button className="btn btn-primary" disabled={!f.name.trim() || !f.date} onClick={add}>Add holiday</button>
+        </div>
+      )}
+      {err && <div className="err">{err}</div>}
+      {rows.length === 0 && <p className="muted">No holidays configured.</p>}
+      <table className="table" style={{ maxWidth: 480 }}>
+        <thead><tr><th>Holiday</th><th>Date</th>{canManage && <th />}</tr></thead>
+        <tbody>
+          {rows.map(h => (
+            <tr key={h.id}>
+              <td><strong>{h.name}</strong></td>
+              <td>{new Date(h.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</td>
+              {canManage && <td className="row-actions"><button className="btn btn-sm" onClick={() => remove(h)}>Delete</button></td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

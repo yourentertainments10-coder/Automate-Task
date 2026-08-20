@@ -4,7 +4,7 @@
 # committed anywhere).
 services:
   - type: web
-    name: cartrends-crm
+    name: automate-task   # becomes the URL: automate-task.onrender.com (no spaces allowed)
     runtime: python
     plan: free
     buildCommand: ./render-build.sh
@@ -18,11 +18,11 @@ services:
       - key: DEBUG
         value: "false"
       - key: ALLOWED_HOSTS
-        value: cartrends-crm.onrender.com    # change if Render gives a different name
+        value: automate-task.onrender.com    # change if Render gives a different name
       - key: CSRF_TRUSTED_ORIGINS
-        value: https://cartrends-crm.onrender.com
+        value: https://automate-task.onrender.com
       - key: CORS_ORIGINS
-        value: https://cartrends-crm.onrender.com
+        value: https://automate-task.onrender.com
       - key: DATABASE_URL
         sync: false                  # paste the Neon connection string in the dashboard
       - key: NOTIF_SCHEDULER

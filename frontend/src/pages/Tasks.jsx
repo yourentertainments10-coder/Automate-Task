@@ -64,7 +64,7 @@ export default function Tasks() {
     ['subscribed', 'Subscribed'],
     ['requests', inboxCount > 0 ? `Requests (${inboxCount})` : 'Requests'],
     ['templates', 'Templates'], ['directory', 'Template Directory'],
-    ['activities', 'Activities'], ['holidays', 'Holidays'],
+    ['activities', 'Activities'],
     ...(isAdmin ? [['deleted', 'Deleted']] : []),
   ]
 
@@ -85,7 +85,6 @@ export default function Tasks() {
       {area === 'templates' && <Templates onUse={useTemplate} />}
       {area === 'directory' && <Directory />}
       {area === 'activities' && <Activities />}
-      {area === 'holidays' && <Holidays />}
       {area === 'deleted' && <DeletedTasks />}
     </div>
   )
@@ -221,7 +220,6 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
   const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [team, setTeam] = useState([])        // hierarchy-filtered: who I may assign to
-  const [leads, setLeads] = useState([])
   const [groups, setGroups] = useState([])
   const [settings, setSettings] = useState({})
   const [err, setErr] = useState('')
@@ -242,7 +240,6 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
   useEffect(() => { load() }, [load])
   useEffect(() => {
     api('/api/tasks/assignees/').then(setTeam).catch(() => {})
-    api('/api/leads/?page_size=300').then(d => setLeads(d.results || d)).catch(() => {})
     api('/api/groups/?active=true').then(setGroups).catch(() => {})
     api('/api/task-settings/').then(setSettings).catch(() => {})
   }, [])
@@ -393,7 +390,7 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
 
       {showAdd && (
         <TaskModal
-          user={user} team={team} leads={leads} groups={groups} template={prefill}
+          user={user} team={team} groups={groups} template={prefill}
           onClose={() => { setShowAdd(false); clearPrefill?.() }}
           onSaved={() => { setShowAdd(false); clearPrefill?.(); load() }}
         />
@@ -402,32 +399,78 @@ function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
   )
 }
 
-function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved }) {
+/* Dropdown with checkboxes — used for Assign to and Loop (multi-select) */
+function MultiSelect({ options, selected, onChange, placeholder }) {
+  const [open, setOpen] = useState(false)
+  const picked = options.filter(o => selected.includes(o.id))
+  const label = picked.length === 0 ? (placeholder || '— select —')
+    : picked.length <= 2 ? picked.map(o => o.name).join(', ')
+    : `${picked.length} selected`
+  return (
+    <div style={{ position: 'relative' }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', textAlign: 'left', border: '1px solid var(--line)',
+          borderRadius: 9, padding: '9px 11px', background: 'var(--surface)',
+          cursor: 'pointer', color: picked.length ? 'inherit' : 'var(--muted)',
+        }}>
+        {label}<span style={{ float: 'right', color: 'var(--muted)' }}>▾</span>
+      </button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: 'absolute', zIndex: 10, top: '104%', left: 0, right: 0,
+            maxHeight: 180, overflowY: 'auto', background: 'var(--surface)',
+            border: '1px solid var(--line)', borderRadius: 9,
+            boxShadow: '0 8px 24px rgba(20,32,28,.18)', padding: 6,
+          }}>
+            {options.map(o => (
+              <label key={o.id} style={{
+                display: 'flex', gap: 8, alignItems: 'center', padding: '5px 8px',
+                fontWeight: 'normal', cursor: 'pointer', borderRadius: 6, margin: 0,
+              }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={selected.includes(o.id)}
+                  onChange={() => onChange(selected.includes(o.id)
+                    ? selected.filter(x => x !== o.id) : [...selected, o.id])} />
+                {o.name}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
   const { can } = useAuth()
   const canAddCategory = can('tasks.assign')
   const [f, setF] = useState({
     title: template?.title || '', description: template?.description || '',
     category: template?.category || '', frequency: template?.frequency || 'one_time',
     department: user.department === 'management' ? '' : (user.department || ''),
-    assigned_to: String(user.id), lead: '', group: '',
+    group: '',
     priority: template?.priority || 'normal', due_at: '', repeat_until: '',
     effort: '', effort_unit: 'minutes',
   })
+  const [assignees, setAssignees] = useState([user.id])  // multi-select: one task per person
   const [categories, setCategories] = useState([])
-  const [inLoop, setInLoop] = useState([])          // colleague ids kept in the loop
+  const [inLoop, setInLoop] = useState([])          // Loop: colleagues who follow the task
   const [newCat, setNewCat] = useState(null)        // null = closed, '' = typing
-  const [workload, setWorkload] = useState(null)    // C1: the assignee's pipeline
+  const [workloads, setWorkloads] = useState([])    // C1: pipeline per picked assignee
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const set = k => e => setF(prev => ({ ...prev, [k]: e.target.value }))
 
   // C1: whoever is picked, show their current pipeline (informs, never blocks)
   useEffect(() => {
-    setWorkload(null)
-    if (!f.assigned_to) return
-    api(`/api/tasks/workload/?user=${f.assigned_to}`)
-      .then(setWorkload).catch(() => {})
-  }, [f.assigned_to])
+    let alive = true
+    Promise.all(assignees.map(id =>
+      api(`/api/tasks/workload/?user=${id}`).catch(() => null)))
+      .then(ws => { if (alive) setWorkloads(ws.filter(Boolean)) })
+    return () => { alive = false }
+  }, [assignees])
 
   // Department first, then its categories (global + department-specific)
   useEffect(() => {
@@ -453,29 +496,36 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
     } catch (ex) { setErr(errorText(ex.data) || ex.message) }
   }
 
-  const toggleLoop = (id) =>
-    setInLoop(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-
   const submit = async (e) => {
     e.preventDefault()
     setErr(''); setBusy(true)
     const effort = f.effort
       ? Math.round(Number(f.effort) * (f.effort_unit === 'hours' ? 60 : 1))
       : null
-    const body = {
+    const base = {
       title: f.title, description: f.description, category: f.category,
       department: f.department,
-      frequency: f.frequency, assigned_to: Number(f.assigned_to), priority: f.priority,
-      lead: f.lead ? Number(f.lead) : null,
+      frequency: f.frequency, priority: f.priority,
       group: f.group ? Number(f.group) : null,
       due_at: f.due_at ? new Date(f.due_at).toISOString() : null,
       repeat_until: f.frequency !== 'one_time' && f.repeat_until ? f.repeat_until : null,
       effort_minutes: effort,
-      in_loop: inLoop,
     }
-    try { await api('/api/tasks/', { method: 'POST', body }); onSaved() }
-    catch (ex) { setErr(errorText(ex.data) || ex.message) }
-    finally { setBusy(false) }
+    // one INDIVIDUAL task per picked assignee — each completes their own
+    let created = 0
+    try {
+      for (const id of assignees) {
+        await api('/api/tasks/', {
+          method: 'POST',
+          body: { ...base, assigned_to: id, in_loop: inLoop.filter(x => x !== id) },
+        })
+        created += 1
+      }
+      onSaved()
+    } catch (ex) {
+      setErr((created ? `Created ${created}/${assignees.length}, then failed: ` : '')
+        + (errorText(ex.data) || ex.message))
+    } finally { setBusy(false) }
   }
 
   return (
@@ -488,8 +538,9 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
             <input value={f.title} onChange={set('title')} autoFocus placeholder="e.g. Call Ravi with revised quote" />
           </div>
           <div className="wide">
-            <label>Description</label>
-            <input value={f.description} onChange={set('description')} />
+            <label>Description *</label>
+            <input value={f.description} onChange={set('description')} required
+              placeholder="What exactly has to be done?" />
           </div>
           <div>
             <label>Department</label>
@@ -499,7 +550,7 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
             </select>
           </div>
           <div>
-            <label>Category</label>
+            <label>Category *</label>
             {newCat === null ? (
               <div style={{ display: 'flex', gap: 6 }}>
                 <select value={f.category} onChange={set('category')} style={{ flex: 1 }}>
@@ -532,14 +583,13 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
             </select>
           </div>
           <div>
-            <label>Assign to (your level &amp; below)</label>
-            <select value={f.assigned_to} onChange={set('assigned_to')}>
-              {team.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
+            <label>Assign to * (your level &amp; below — each gets their own task)</label>
+            <MultiSelect options={team} selected={assignees} onChange={setAssignees}
+              placeholder="— pick people —" />
           </div>
-          {workload && (
+          {workloads.length > 0 && (
             <div className="wide">
-              <WorkloadPanel w={workload} />
+              {workloads.map(w => <WorkloadPanel key={w.user} w={w} />)}
             </div>
           )}
           <div>
@@ -554,11 +604,9 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
             </div>
           </div>
           <div>
-            <label>Linked lead</label>
-            <select value={f.lead} onChange={set('lead')}>
-              <option value="">None</option>
-              {leads.map(l => <option key={l.id} value={l.id}>{l.customer_name}</option>)}
-            </select>
+            <label>Loop (colleagues who follow this task)</label>
+            <MultiSelect options={team.filter(a => a.id !== user.id)}
+              selected={inLoop} onChange={setInLoop} placeholder="— optional —" />
           </div>
           <div>
             <label>Group</label>
@@ -574,8 +622,8 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
             </select>
           </div>
           <div>
-            <label>Due {f.frequency !== 'one_time' && '(first occurrence)'}</label>
-            <input type="datetime-local" value={f.due_at} onChange={set('due_at')} />
+            <label>Due * {f.frequency !== 'one_time' && '(first occurrence)'}</label>
+            <input type="datetime-local" value={f.due_at} onChange={set('due_at')} required />
           </div>
           {f.frequency !== 'one_time' && (
             <div>
@@ -583,27 +631,15 @@ function TaskModal({ user, team, leads, groups = [], template, onClose, onSaved 
               <input type="date" value={f.repeat_until} onChange={set('repeat_until')} />
             </div>
           )}
-          {team.filter(a => a.id !== user.id).length > 0 && (
-            <div className="wide">
-              <label>In the loop — colleagues who follow this task</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
-                {team.filter(a => a.id !== user.id).map(a => (
-                  <label key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 'normal' }}>
-                    <input type="checkbox" checked={inLoop.includes(a.id)}
-                      onChange={() => toggleLoop(a.id)} />
-                    {a.name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
         {err && <div className="err">{err}</div>}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn btn-primary"
-            disabled={busy || !f.title.trim() || !f.effort}>
-            {busy ? 'Saving…' : 'Create task'}
+            disabled={busy || !f.title.trim() || !f.description.trim()
+              || !f.category || !f.effort || !f.due_at || assignees.length === 0}>
+            {busy ? 'Saving…'
+              : assignees.length > 1 ? `Create ${assignees.length} tasks` : 'Create task'}
           </button>
         </div>
       </form>
@@ -749,51 +785,4 @@ function Activities() {
   )
 }
 
-/* ================= Holidays ================= */
-
-function Holidays() {
-  const { can } = useAuth()
-  const canManage = can('settings.manage')
-  const [rows, setRows] = useState([])
-  const [err, setErr] = useState('')
-  const [f, setF] = useState({ name: '', date: '' })
-
-  const load = () => api('/api/holidays/').then(setRows).catch(e => setErr(e.message))
-  useEffect(() => { load() }, [])
-
-  const add = async () => {
-    setErr('')
-    try { await api('/api/holidays/', { method: 'POST', body: f }); setF({ name: '', date: '' }); load() }
-    catch (e) { setErr(errorText(e.data) || e.message) }
-  }
-  const remove = async (h) => {
-    try { await api(`/api/holidays/${h.id}/`, { method: 'DELETE' }); load() }
-    catch (e) { setErr(errorText(e.data) || e.message) }
-  }
-
-  return (
-    <div>
-      {canManage && (
-        <div className="filters">
-          <input placeholder="Holiday name" value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} />
-          <input type="date" value={f.date} onChange={e => setF(p => ({ ...p, date: e.target.value }))} />
-          <button className="btn btn-primary" disabled={!f.name.trim() || !f.date} onClick={add}>Add holiday</button>
-        </div>
-      )}
-      {err && <div className="err">{err}</div>}
-      {rows.length === 0 && <p className="muted">No holidays configured.</p>}
-      <table className="table" style={{ maxWidth: 480 }}>
-        <thead><tr><th>Holiday</th><th>Date</th>{canManage && <th />}</tr></thead>
-        <tbody>
-          {rows.map(h => (
-            <tr key={h.id}>
-              <td><strong>{h.name}</strong></td>
-              <td>{new Date(h.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</td>
-              {canManage && <td className="row-actions"><button className="btn btn-sm" onClick={() => remove(h)}>Delete</button></td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
+/* Holidays moved to the Attendance page (HR.jsx) — reviewer feedback. */

@@ -625,6 +625,7 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .modal-card {
   width: 520px; max-width: 94vw; background: var(--surface); border-radius: 16px;
   padding: 22px 24px; box-shadow: 0 20px 60px rgba(20,32,28,.3);
+  max-height: 88vh; overflow-y: auto;   /* long forms scroll inside the card */
 }
 .modal-card h2 { font-size: 19px; margin-bottom: 14px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
