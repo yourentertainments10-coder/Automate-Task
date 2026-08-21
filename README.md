@@ -254,6 +254,8 @@ All under `/api/`, JWT `Authorization: Bearer <token>` unless noted.
 | `tasks/{id}/progress/` | POST | assignee | repeatable status update: % done, effort spent so far, comment — logs to activity, notifies creator |
 | `tasks/{id}/complete/` | POST | assignee | complete: description + actual effort spent MANDATORY, proof file per settings |
 | `tasks/time_report/?range=` | GET | self · dept (manager) · all (admin) | Time Earned (assigned effort) vs Time Spent (actual) per person |
+| `tasks/employees_report/?range=&grain=` | GET | self · dept (manager) · all (admin) | per-person counts+%, transparent score (60/40 formula), multitasker index; `grain=daily` = completion-day crediting; `range=custom&start&end` |
+| `tasks/effort_disputes/?range=` | GET | self · dept (manager) · all (admin) | effort vs estimate vs actual, sorted by disagreement |
 | `mistakes/` + `/{id}/` | CRUD | own · dept (manager) · all (admin) · `?important=true` founder filter | Mistake Register: category, severity (SLA), classification, SOP linking, financial loss |
 | `mistakes/{id}/explain\|confirm_repeat\|review\|create_task\|events/` | POST/GET | employee · manager · manager · manager · visible | 3-level accountability: structured root cause; "Same/Different error"; review (can't just close); corrective task; audit trail |
 | `mistake-categories/` | GET · CUD | read any · write `settings.manage` | 29 seeded configurable categories |

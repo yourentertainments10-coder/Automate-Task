@@ -535,6 +535,189 @@ class TaskViewSet(viewsets.ModelViewSet):
         rows = sorted(people.values(), key=lambda r: -r["time_earned_minutes"])
         return Response({"range": rng, "rows": rows})
 
+    # D2 score weights (Sir's proposal, shown openly in the UI tooltip)
+    SCORE_ON_TIME_WEIGHT = 60
+    SCORE_EFFORT_WEIGHT = 40
+    MULTITASK_PARALLEL = 3      # D4: a "multitask day" has >= this many active tasks
+
+    def _report_bounds(self, p, now):
+        """Presets from _range_bounds plus range=custom&start=&end= (D3)."""
+        rng = p.get("range", "this_month")
+        if rng == "custom":
+            from datetime import date as _date
+            try:
+                start = _date.fromisoformat(p.get("start", ""))
+                end = _date.fromisoformat(p.get("end", ""))
+            except ValueError:
+                raise ValidationError({"range": "Custom range needs start and end as YYYY-MM-DD."})
+            if end < start:
+                raise ValidationError({"range": "End date is before the start date."})
+            return start, end
+        return _range_bounds(rng, now)
+
+    def _report_users(self, user):
+        if has_capability(user, "tasks.view_all"):
+            return list(User.objects.filter(is_active=True))
+        if has_capability(user, "tasks.view_department"):
+            from django.db.models import Q as _Q
+            return list(User.objects.filter(is_active=True).filter(
+                _Q(department=user.department) | _Q(reporting_manager=user)
+                | _Q(pk=user.pk)).distinct())
+        return [user]
+
+    @action(detail=False, methods=["get"])
+    def employees_report(self, request):
+        """D2/D3/D4: per-person report over the range — counts, transparent
+        score, time earned/assigned/spent, multitasker index. ?grain=daily
+        returns the per-day view instead (completion-day crediting, D1)."""
+        now = timezone.now()
+        p = request.query_params
+        start, end = self._report_bounds(p, now)
+        users = self._report_users(request.user)
+        today = timezone.localtime(now).date()
+
+        raw = Task.objects.filter(assigned_to__in=users, deleted_at__isnull=True) \
+            .values("assigned_to_id", "status", "due_at", "completed_at",
+                    "created_at", "effort_minutes", "actual_minutes")
+        per = {u.pk: [] for u in users}
+        for t in raw:
+            anchor = timezone.localtime(t["due_at"] or t["created_at"]).date()
+            if start and not (start <= anchor <= end):
+                continue
+            per[t["assigned_to_id"]].append(t)
+
+        if p.get("grain") == "daily":
+            # D1: effort credits land on the COMPLETION day, whole
+            days = {}
+            for sub in per.values():
+                for t in sub:
+                    if t["status"] != TaskStatus.DONE or not t["completed_at"]:
+                        continue
+                    d = timezone.localtime(t["completed_at"]).date()
+                    row = days.setdefault(d, {"date": d, "completed": 0, "in_time": 0,
+                                              "delayed": 0, "time_earned_minutes": 0,
+                                              "time_spent_minutes": 0})
+                    row["completed"] += 1
+                    late = t["due_at"] and t["completed_at"] > t["due_at"]
+                    row["delayed" if late else "in_time"] += 1
+                    row["time_earned_minutes"] += t["effort_minutes"] or 0
+                    row["time_spent_minutes"] += t["actual_minutes"] or 0
+            return Response({"rows": sorted(days.values(), key=lambda r: r["date"], reverse=True)})
+
+        name_of = {u.pk: (u.get_full_name() or u.username) for u in users}
+        rows = []
+        for uid, sub in per.items():
+            if not sub:
+                continue
+            c = Counter()
+            assigned = earned = spent = 0
+            intervals = []
+            for t in sub:
+                if t["status"] != TaskStatus.DONE and t["due_at"] and t["due_at"] < now:
+                    c["overdue"] += 1
+                if t["status"] == TaskStatus.OPEN:
+                    c["pending"] += 1
+                elif t["status"] == TaskStatus.IN_PROGRESS:
+                    c["in_progress"] += 1
+                else:
+                    c["completed"] += 1
+                    late = t["due_at"] and t["completed_at"] and t["completed_at"] > t["due_at"]
+                    c["delayed" if late else "in_time"] += 1
+                    earned += t["effort_minutes"] or 0
+                    spent += t["actual_minutes"] or 0
+                assigned += t["effort_minutes"] or 0
+                s = timezone.localtime(t["created_at"]).date()
+                e = timezone.localtime(t["completed_at"]).date() if t["completed_at"] else today
+                intervals.append((s, e, t))
+
+            # D4: multitask days — >= MULTITASK_PARALLEL tasks active the same day
+            win_start = start or min(s for s, _, _ in intervals)
+            win_end = min(end or today, today)
+            n_days = min((win_end - win_start).days + 1, 92)   # capped sweep
+            diff = [0] * (n_days + 1)
+            for s, e, _ in intervals:
+                lo = max((s - win_start).days, 0)
+                hi = min((e - win_start).days, n_days - 1)
+                if hi < 0 or lo >= n_days:
+                    continue
+                diff[lo] += 1
+                diff[hi + 1] -= 1
+            counts, running = [], 0
+            for d in diff[:n_days]:
+                running += d
+                counts.append(running)
+            mt_days = {win_start + timedelta(days=i)
+                       for i, n in enumerate(counts) if n >= self.MULTITASK_PARALLEL}
+            mt_done = mt_in_time = 0
+            for _, _, t in intervals:
+                if t["status"] == TaskStatus.DONE and t["completed_at"] \
+                        and timezone.localtime(t["completed_at"]).date() in mt_days:
+                    mt_done += 1
+                    if not (t["due_at"] and t["completed_at"] > t["due_at"]):
+                        mt_in_time += 1
+
+            completed = c.get("completed", 0)
+            on_time_rate = (c.get("in_time", 0) / completed) if completed else None
+            effort_ratio = min(1.0, earned / assigned) if assigned else None
+            score = None
+            if on_time_rate is not None and effort_ratio is not None:
+                score = round(self.SCORE_ON_TIME_WEIGHT * on_time_rate
+                              + self.SCORE_EFFORT_WEIGHT * effort_ratio, 1)
+            elif on_time_rate is not None:   # no effort values set anywhere
+                score = round(100 * on_time_rate, 1)
+
+            rows.append({
+                "user": uid, "name": name_of[uid], "total": len(sub),
+                **{k: c.get(k, 0) for k in ("overdue", "pending", "in_progress",
+                                            "completed", "in_time", "delayed")},
+                "time_assigned_minutes": assigned,
+                "time_earned_minutes": earned,
+                "time_spent_minutes": spent,
+                "on_time_rate": round(on_time_rate * 100, 1) if on_time_rate is not None else None,
+                "effort_ratio": round(effort_ratio * 100, 1) if effort_ratio is not None else None,
+                "score": score,
+                "multitask_days": len(mt_days),
+                "multitask_on_time": round(100 * mt_in_time / mt_done, 1) if mt_done else None,
+            })
+        rows.sort(key=lambda r: (-(r["score"] or -1), r["name"]))
+        return Response({
+            "rows": rows,
+            "formula": f"Score = {self.SCORE_ON_TIME_WEIGHT} × on-time rate + "
+                       f"{self.SCORE_EFFORT_WEIGHT} × (time earned ÷ time assigned)",
+        })
+
+    @action(detail=False, methods=["get"])
+    def effort_disputes(self, request):
+        """D5: tasks where the assignee's estimate diverged from the
+        assigner's effort value — review-meeting ammunition."""
+        from django.db.models import F
+        now = timezone.now()
+        p = request.query_params
+        start, end = self._report_bounds(p, now)
+        users = self._report_users(request.user)
+        qs = (Task.objects.filter(assigned_to__in=users, deleted_at__isnull=True,
+                                  effort_minutes__isnull=False,
+                                  assignee_estimate_minutes__isnull=False)
+              .exclude(effort_minutes=F("assignee_estimate_minutes"))
+              .select_related("assigned_to", "created_by"))
+        rows = []
+        for t in qs:
+            anchor = timezone.localtime(t.due_at or t.created_at).date()
+            if start and not (start <= anchor <= end):
+                continue
+            rows.append({
+                "id": t.id, "code": t.code, "title": t.title,
+                "assignee": t.assigned_to.get_full_name() or t.assigned_to.username,
+                "assigner": (t.created_by.get_full_name() or t.created_by.username)
+                if t.created_by else "—",
+                "effort_minutes": t.effort_minutes,
+                "estimate_minutes": t.assignee_estimate_minutes,
+                "actual_minutes": t.actual_minutes,
+                "status": t.status,
+            })
+        rows.sort(key=lambda r: -abs(r["estimate_minutes"] - r["effort_minutes"]) / r["effort_minutes"])
+        return Response({"rows": rows})
+
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
         """B3: complete WITH evidence (remarks and/or a proof file), used when
@@ -654,7 +837,8 @@ class TaskViewSet(viewsets.ModelViewSet):
         if p.get("search"):
             qs = qs.filter(title__icontains=p["search"])
 
-        start, end = _range_bounds(p.get("range", "this_week"), now)
+        start, end = self._report_bounds(p, now) if p.get("range") == "custom" \
+            else _range_bounds(p.get("range", "this_week"), now)
         rows = []
         for t in qs.values("category", "status", "due_at", "completed_at", "created_at"):
             anchor = timezone.localtime(t["due_at"] or t["created_at"]).date()

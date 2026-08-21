@@ -128,31 +128,29 @@ to whoever assigned" = ALREADY DONE — score that point).
 
 ## Phase D — Time Earned, scoring & reports
 
-- [ ] **D1 · Time Earned.** Completing a task credits its `effort_minutes` to
-      the assignee for that day. An 18-hour task completed on day 3 credits
-      all 18h that day — the weekly view balances it (exactly Speaker 4's
-      design). Tasks with no effort value count toward task-count metrics but
-      earn 0 time — visible, so assigners learn to set effort.
-- [ ] **D2 · Score formula — transparent, shown in a tooltip** (the thing the
-      teardown couldn't extract from Automate Tasks — ours will be visible).
-      Proposal (CONFIRM weights): Score % = 60 × on-time-completion-rate +
-      40 × effort-weighted completion (time earned ÷ time assigned), over the
-      selected date range.
-- [ ] **D3 · Dashboard v2.** Percentages on the six tiles; **tiles click
-      through** to the filtered task list; new **Employees report tab**
-      (per-person: total, score, overdue/pending/in-progress/in-time/delayed
-      counts + %) for managers/admin with the per-person slide-over
-      drill-down (stats + their tasks + attendance link — teardown §3.3);
-      **Daily** grain tab; CSV export of the current view; **Custom date
-      range** picker added to the presets.
-- [ ] **D4 · Multitasker index.** Sir explicitly wants to identify
-      multitaskers: measure days with ≥N parallel active tasks × on-time
-      completion of those overlapping tasks; surfaced as a badge/column in
-      the Employees report and fed to D5/E3 review output.
-- [ ] **D5 · Effort-dispute report.** Side-by-side list of tasks where the
-      assignee's estimate diverged from the assigner's effort value — the
-      "Amit said 1 hour, Bhavna said 4" review ammunition, filterable for the
-      15-day review meeting.
+- [x] **D1 · Time Earned** — DONE 20 Aug: completion-day crediting (an
+      18-hour task done on day 3 credits all 18h that day) via the Daily
+      grain of the Employees report; no-effort tasks earn 0 and are shown
+      separately so assigners learn.
+- [x] **D2 · Score formula — transparent**: Score = 60 × on-time rate +
+      40 × (time earned ÷ time assigned). Weights are class constants
+      (SCORE_ON_TIME_WEIGHT/SCORE_EFFORT_WEIGHT — one-line change when Sir
+      confirms different ones). Formula printed openly above the table AND
+      in the score tooltip with the per-person breakdown.
+- [x] **D3 · Dashboard v2**: tiles show %, tiles click through to the
+      filtered task list (overdue→Overdue-only, completed→Done…);
+      **Employees tab** (managers/admin — employees see their own row):
+      per-person counts + %, score, Earned/Spent; row click opens the
+      slide-over drill-down (stats + open tasks + attendance link);
+      **Daily** grain toggle; **CSV export** of either view; **Custom
+      date-range** picker on dashboard + all reports
+      (`range=custom&start&end`). `GET /api/tasks/employees_report/`.
+- [x] **D4 · Multitasker index**: per person, days with ≥3 parallel active
+      tasks (92-day capped sweep) + on-time rate of tasks completed on
+      those days; 🤹 badge when ≥3 such days at ≥70% on-time.
+- [x] **D5 · Effort-dispute report**: Disputes tab — assigner's effort vs
+      assignee's estimate vs what it ACTUALLY took, sorted by size of
+      disagreement. `GET /api/tasks/effort_disputes/`. 7 API tests.
 
 ## Phase E — Task detail panel + creation & AI
 

@@ -46,8 +46,10 @@ const RANGES = [
 export default function Tasks() {
   const { can } = useAuth()
   const isAdmin = can('tasks.view_all')
+  const isManager = isAdmin || can('tasks.view_department')
   const [area, setArea] = useState('dashboard')
   const [prefill, setPrefill] = useState(null)   // template -> open list with modal
+  const [listPreset, setListPreset] = useState(null)  // D3: tile click-through filters
   const [inboxCount, setInboxCount] = useState(0)
 
   const refreshInbox = useCallback(() => {
@@ -65,6 +67,7 @@ export default function Tasks() {
     ['requests', inboxCount > 0 ? `Requests (${inboxCount})` : 'Requests'],
     ['templates', 'Templates'], ['directory', 'Template Directory'],
     ['activities', 'Activities'], ['time', 'Time Report'],
+    ...(isManager ? [['employees', 'Employees'], ['disputes', 'Disputes']] : []),
     ...(isAdmin ? [['deleted', 'Deleted']] : []),
   ]
 
@@ -76,9 +79,13 @@ export default function Tasks() {
           <button key={v} className={'tab' + (area === v ? ' on' : '')} onClick={() => setArea(v)}>{l}</button>
         ))}
       </div>
-      {area === 'dashboard' && <TaskDashboard />}
+      {area === 'dashboard' && (
+        <TaskDashboard onTileClick={(preset) => { setListPreset(preset); setArea(preset.area) }} />
+      )}
       {['my', 'delegated', 'subscribed'].includes(area) && (
-        <TaskList scope={area} key={area} prefill={prefill} clearPrefill={() => setPrefill(null)}
+        <TaskList scope={area} key={area} prefill={prefill}
+          clearPrefill={() => setPrefill(null)} preset={listPreset}
+          clearPreset={() => setListPreset(null)}
           onRequestsChanged={refreshInbox} />
       )}
       {area === 'requests' && <ChangeRequests isAdmin={isAdmin} onChanged={refreshInbox} />}
@@ -86,6 +93,8 @@ export default function Tasks() {
       {area === 'directory' && <Directory />}
       {area === 'activities' && <Activities />}
       {area === 'time' && <TimeReport />}
+      {area === 'employees' && <EmployeesReport />}
+      {area === 'disputes' && <DisputesReport />}
       {area === 'deleted' && <DeletedTasks />}
     </div>
   )
@@ -99,10 +108,47 @@ const TILES = [
   ['in_time', 'In Time', 'good'], ['delayed', 'Delayed', 'alert'],
 ]
 
-function TaskDashboard() {
+/* D3: preset chips + a custom from–to picker, shared by dashboard & reports */
+function RangePicker({ range, setRange, custom, setCustom }) {
+  return (
+    <div className="filters">
+      {RANGES.map(([v, l]) => (
+        <button key={v} className={'chip' + (range === v ? ' on-accent' : '')} onClick={() => setRange(v)}>{l}</button>
+      ))}
+      <button className={'chip' + (range === 'custom' ? ' on-accent' : '')}
+        onClick={() => setRange('custom')}>Custom</button>
+      {range === 'custom' && (
+        <>
+          <input type="date" value={custom.start} onChange={e => setCustom(c => ({ ...c, start: e.target.value }))} />
+          <span className="muted">to</span>
+          <input type="date" value={custom.end} onChange={e => setCustom(c => ({ ...c, end: e.target.value }))} />
+        </>
+      )}
+    </div>
+  )
+}
+
+const rangeParams = (range, custom) => {
+  const p = new URLSearchParams({ range })
+  if (range === 'custom') { p.set('start', custom.start); p.set('end', custom.end) }
+  return p
+}
+
+/* D3: which list-filters a tile click jumps to */
+const TILE_PRESETS = {
+  overdue: { tab: 'open,in_progress', overdue: true },
+  pending: { tab: 'open,in_progress' },
+  in_progress: { tab: 'open,in_progress' },
+  completed: { tab: 'done' },
+  in_time: { tab: 'done' },
+  delayed: { tab: 'done' },
+}
+
+function TaskDashboard({ onTileClick }) {
   const { can } = useAuth()
   const hasGroup = can('tasks.view_all') || can('tasks.view_department')
   const [range, setRange] = useState('this_week')
+  const [custom, setCustom] = useState({ start: '', end: '' })
   const [scope, setScope] = useState('my')
   const [category, setCategory] = useState('')
   const [search, setSearch] = useState('')
@@ -113,19 +159,17 @@ function TaskDashboard() {
 
   useEffect(() => { api('/api/tasks/categories/').then(setCats).catch(() => {}) }, [])
   useEffect(() => {
-    const p = new URLSearchParams({ range, scope })
+    if (range === 'custom' && (!custom.start || !custom.end)) return
+    const p = rangeParams(range, custom)
+    p.set('scope', scope)
     if (category) p.set('category', category)
     if (search.trim()) p.set('search', search.trim())
     api(`/api/tasks/dashboard/?${p}`).then(d => { setData(d); setErr('') }).catch(e => setErr(e.message))
-  }, [range, scope, category, search])
+  }, [range, custom, scope, category, search])
 
   return (
     <div>
-      <div className="filters">
-        {RANGES.map(([v, l]) => (
-          <button key={v} className={'chip' + (range === v ? ' on-accent' : '')} onClick={() => setRange(v)}>{l}</button>
-        ))}
-      </div>
+      <RangePicker range={range} setRange={setRange} custom={custom} setCustom={setCustom} />
       <div className="filters">
         <div className="seg">
           <button className={'seg-btn' + (scope === 'my' ? ' on' : '')} onClick={() => setScope('my')}>My Report</button>
@@ -146,11 +190,22 @@ function TaskDashboard() {
       {data && (
         <>
           <div className="stats">
-            {TILES.map(([k, l, tone]) => (
-              <div key={k} className={'stat' + (tone === 'alert' && data.tiles[k] > 0 ? ' alert' : '')}>
-                <div className="label">{l}</div><div className="value">{data.tiles[k]}</div>
-              </div>
-            ))}
+            {TILES.map(([k, l, tone]) => {
+              const pct = data.tiles.total ? Math.round(100 * data.tiles[k] / data.tiles.total) : 0
+              return (
+                <div key={k}
+                  className={'stat' + (tone === 'alert' && data.tiles[k] > 0 ? ' alert' : '')}
+                  style={{ cursor: scope !== 'group' ? 'pointer' : 'default' }}
+                  title={scope !== 'group' ? 'Open the matching task list' : undefined}
+                  onClick={() => scope !== 'group' && onTileClick?.({
+                    area: scope === 'delegated' ? 'delegated' : 'my', ...TILE_PRESETS[k],
+                  })}>
+                  <div className="label">{l}</div>
+                  <div className="value">{data.tiles[k]}</div>
+                  <div className="small muted">{pct}%</div>
+                </div>
+              )
+            })}
           </div>
           {data.categories.length === 0 && <p className="muted">No tasks in this range.</p>}
           {data.categories.length > 0 && view === 'table' && (
@@ -217,15 +272,23 @@ function TaskDashboard() {
 
 const STATUS_TABS = [['open,in_progress', 'Open'], ['done', 'Done'], ['', 'All']]
 
-function TaskList({ scope, prefill, clearPrefill, onRequestsChanged }) {
+function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequestsChanged }) {
   const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [team, setTeam] = useState([])        // hierarchy-filtered: who I may assign to
   const [groups, setGroups] = useState([])
   const [settings, setSettings] = useState({})
   const [err, setErr] = useState('')
-  const [tab, setTab] = useState('open,in_progress')
-  const [onlyOverdue, setOnlyOverdue] = useState(false)
+  const [tab, setTab] = useState(preset?.tab ?? 'open,in_progress')
+  const [onlyOverdue, setOnlyOverdue] = useState(!!preset?.overdue)
+  // D3 tile click-through: apply the tile's filters once, then forget them
+  useEffect(() => {
+    if (preset) {
+      setTab(preset.tab ?? 'open,in_progress')
+      setOnlyOverdue(!!preset.overdue)
+      clearPreset?.()
+    }
+  }, [preset])  // eslint-disable-line react-hooks/exhaustive-deps
   const [onlyRecurring, setOnlyRecurring] = useState(false)
   const [showAdd, setShowAdd] = useState(!!prefill)
   const [completing, setCompleting] = useState(null)   // task in the evidence modal
@@ -868,6 +931,222 @@ function TimeReport() {
                 </tr>
               )
             })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+/* ================= Employees report (D2/D3/D4) ================= */
+
+const downloadCSV = (filename, header, rows) => {
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\n')
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+function EmployeesReport() {
+  const [range, setRange] = useState('this_month')
+  const [custom, setCustom] = useState({ start: '', end: '' })
+  const [grain, setGrain] = useState('person')     // person | daily
+  const [data, setData] = useState(null)
+  const [person, setPerson] = useState(null)       // slide-over
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    if (range === 'custom' && (!custom.start || !custom.end)) return
+    const p = rangeParams(range, custom)
+    if (grain === 'daily') p.set('grain', 'daily')
+    api(`/api/tasks/employees_report/?${p}`)
+      .then(d => { setData(d); setErr('') })
+      .catch(e => setErr(errorText(e.data) || e.message))
+  }, [range, custom, grain])
+
+  const exportCSV = () => {
+    if (grain === 'daily') {
+      downloadCSV(`daily-report-${range}.csv`,
+        ['Date', 'Completed', 'In time', 'Delayed', 'Time earned (min)', 'Time spent (min)'],
+        data.rows.map(r => [r.date, r.completed, r.in_time, r.delayed,
+          r.time_earned_minutes, r.time_spent_minutes]))
+    } else {
+      downloadCSV(`employees-report-${range}.csv`,
+        ['Person', 'Score', 'Total', 'Overdue', 'Pending', 'In progress', 'Completed',
+          'In time', 'Delayed', 'Time assigned (min)', 'Time earned (min)',
+          'Time spent (min)', 'Multitask days'],
+        data.rows.map(r => [r.name, r.score ?? '', r.total, r.overdue, r.pending,
+          r.in_progress, r.completed, r.in_time, r.delayed, r.time_assigned_minutes,
+          r.time_earned_minutes, r.time_spent_minutes, r.multitask_days]))
+    }
+  }
+
+  if (err) return <div className="err">{err}</div>
+  if (!data) return <div className="center-note">Loading report…</div>
+  const pct = (n, d) => d ? `${Math.round(100 * n / d)}%` : '—'
+
+  return (
+    <div>
+      <RangePicker range={range} setRange={setRange} custom={custom} setCustom={setCustom} />
+      <div className="filters">
+        <div className="seg">
+          <button className={'seg-btn' + (grain === 'person' ? ' on' : '')}
+            onClick={() => setGrain('person')}>Per person</button>
+          <button className={'seg-btn' + (grain === 'daily' ? ' on' : '')}
+            onClick={() => setGrain('daily')}>Daily</button>
+        </div>
+        <span style={{ flex: 1 }} />
+        {data.rows?.length > 0 && (
+          <button className="btn btn-sm" onClick={exportCSV}>⬇ Export CSV</button>
+        )}
+      </div>
+      {data.formula && grain === 'person' && (
+        <p className="muted small">Formula (open, not a black box): <strong>{data.formula}</strong>.
+          Tasks with no effort value earn 0 — set effort while assigning.</p>
+      )}
+      {(!data.rows || data.rows.length === 0) && <p className="muted">No tasks in this range.</p>}
+
+      {grain === 'daily' && data.rows?.length > 0 && (
+        <table className="table" style={{ maxWidth: 720 }}>
+          <thead><tr><th>Date</th><th>Completed</th><th>In time</th><th>Delayed</th><th>Time Earned</th><th>Time Spent</th></tr></thead>
+          <tbody>
+            {data.rows.map(r => (
+              <tr key={r.date}>
+                <td><strong>{new Date(r.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</strong></td>
+                <td>{r.completed}</td><td className="ok">{r.in_time}</td>
+                <td className={r.delayed ? 'late' : ''}>{r.delayed}</td>
+                <td>{fmtEffort(r.time_earned_minutes) || '0m'}</td>
+                <td>{fmtEffort(r.time_spent_minutes) || '0m'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {grain === 'person' && data.rows?.length > 0 && (
+        <table className="table">
+          <thead>
+            <tr><th>Person</th><th>Score</th><th>Total</th><th>Overdue</th><th>Pending</th>
+              <th>In prog.</th><th>Done</th><th>In time</th><th>Delayed</th>
+              <th>Earned</th><th>Spent</th></tr>
+          </thead>
+          <tbody>
+            {data.rows.map(r => (
+              <tr key={r.user} style={{ cursor: 'pointer' }} onClick={() => setPerson(r)}>
+                <td>
+                  <strong>{r.name}</strong>
+                  {r.multitask_days >= 3 && (r.multitask_on_time ?? 0) >= 70 && (
+                    <span className="ai-chip" title={`${r.multitask_days} days with 3+ parallel tasks, ${r.multitask_on_time}% of them finished on time`}>🤹 Multitasker</span>
+                  )}
+                </td>
+                <td title={`${data.formula}\nOn-time: ${r.on_time_rate ?? '—'}% · Effort earned: ${r.effort_ratio ?? '—'}%`}>
+                  <strong>{r.score ?? '—'}</strong>
+                </td>
+                <td>{r.total}</td>
+                <td className={r.overdue ? 'late' : ''}>{r.overdue}</td>
+                <td>{r.pending}</td><td>{r.in_progress}</td>
+                <td className="ok">{r.completed} ({pct(r.completed, r.total)})</td>
+                <td>{r.in_time} ({pct(r.in_time, r.completed)})</td>
+                <td className={r.delayed ? 'late' : ''}>{r.delayed} ({pct(r.delayed, r.completed)})</td>
+                <td>{fmtEffort(r.time_earned_minutes) || '0m'}</td>
+                <td>{fmtEffort(r.time_spent_minutes) || '0m'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {person && <PersonSlideOver r={person} formula={data.formula} onClose={() => setPerson(null)} />}
+    </div>
+  )
+}
+
+/* D3: per-person drill-down — stats + their open tasks + attendance link */
+function PersonSlideOver({ r, formula, onClose }) {
+  const [tasks, setTasks] = useState(null)
+  useEffect(() => {
+    api(`/api/tasks/?assigned_to=${r.user}&page_size=30&status=open,in_progress`)
+      .then(d => setTasks(d.results || d)).catch(() => setTasks([]))
+  }, [r.user])
+  return (
+    <div className="modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="modal-card" style={{ width: 560 }}>
+        <h2>{r.name}</h2>
+        <div className="stats" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="stat"><div className="label">Score</div><div className="value" title={formula}>{r.score ?? '—'}</div></div>
+          <div className="stat"><div className="label">Time Earned</div><div className="value">{fmtEffort(r.time_earned_minutes) || '0m'}</div></div>
+          <div className="stat"><div className="label">Time Spent</div><div className="value">{fmtEffort(r.time_spent_minutes) || '0m'}</div></div>
+          <div className="stat"><div className="label">On-time</div><div className="value">{r.on_time_rate ?? '—'}%</div></div>
+          <div className="stat"><div className="label">Overdue now</div><div className="value">{r.overdue}</div></div>
+          <div className="stat"><div className="label">Multitask days</div><div className="value">{r.multitask_days}</div></div>
+        </div>
+        <h3 style={{ margin: '12px 0 6px' }}>Open tasks</h3>
+        {!tasks && <p className="muted small">Loading…</p>}
+        {tasks?.length === 0 && <p className="muted small">Nothing open right now.</p>}
+        {tasks?.length > 0 && (
+          <div className="task-list" style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {tasks.map(t => (
+              <div key={t.id} className="task-row">
+                <div className="task-main">
+                  <div className="task-title"><span className="t-code">{t.code}</span>{t.title}</div>
+                  <div className="when">{t.due_at ? relDue(t.due_at) : 'no due date'}
+                    {t.effort_minutes && <> · ⏱ {fmtEffort(t.effort_minutes)}</>}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="modal-actions">
+          <a className="btn" href="/hr">Attendance page →</a>
+          <button className="btn btn-primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ================= Effort disputes (D5) ================= */
+
+function DisputesReport() {
+  const [range, setRange] = useState('this_month')
+  const [custom, setCustom] = useState({ start: '', end: '' })
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    if (range === 'custom' && (!custom.start || !custom.end)) return
+    api(`/api/tasks/effort_disputes/?${rangeParams(range, custom)}`)
+      .then(d => { setData(d); setErr('') })
+      .catch(e => setErr(errorText(e.data) || e.message))
+  }, [range, custom])
+  if (err) return <div className="err">{err}</div>
+  if (!data) return <div className="center-note">Loading…</div>
+  return (
+    <div style={{ maxWidth: 860 }}>
+      <RangePicker range={range} setRange={setRange} custom={custom} setCustom={setCustom} />
+      <p className="muted small">
+        Where the assigner and the assignee disagreed on how long a task takes —
+        &ldquo;Amit said 1 hour, Bhavna said 4&rdquo;. Sorted by the size of the
+        disagreement; the Actual column settles the argument.
+      </p>
+      {data.rows.length === 0 && <p className="muted">No disputes in this range — everyone agrees. 🎉</p>}
+      {data.rows.length > 0 && (
+        <table className="table">
+          <thead><tr><th>Task</th><th>Assignee</th><th>Assigner said</th><th>Assignee said</th><th>Actually took</th><th>Status</th></tr></thead>
+          <tbody>
+            {data.rows.map(r => (
+              <tr key={r.id}>
+                <td><span className="t-code">{r.code}</span> <strong>{r.title}</strong>
+                  <div className="muted small">assigned by {r.assigner}</div></td>
+                <td>{r.assignee}</td>
+                <td>{fmtEffort(r.effort_minutes)}</td>
+                <td className={r.estimate_minutes > r.effort_minutes ? 'late' : 'ok'}>
+                  {fmtEffort(r.estimate_minutes)}</td>
+                <td><strong>{r.actual_minutes ? fmtEffort(r.actual_minutes) : '—'}</strong></td>
+                <td>{r.status}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
