@@ -187,6 +187,9 @@ class Task(models.Model):
     category = models.CharField(max_length=60, blank=True, default="")
     frequency = models.CharField(max_length=10, choices=TaskFrequency.choices, default=TaskFrequency.ONE_TIME)
     lead = models.ForeignKey(Lead, null=True, blank=True, on_delete=models.CASCADE, related_name="tasks")
+    # E1: sub-tasks — one level deep (a sub-task can't have its own children)
+    parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.CASCADE,
+                               related_name="subtasks")
     # Optional workspace-group scoping: group members can see the group's tasks.
     group = models.ForeignKey("workspace.Group", null=True, blank=True,
                               on_delete=models.SET_NULL, related_name="tasks")
@@ -312,15 +315,31 @@ class TaskSettings(models.Model):
 
 
 class TaskActivity(models.Model):
-    """Audit trail for tasks -- who did what, when (the 'Activities' feed)."""
+    """Audit trail for tasks -- who did what, when (the 'Activities' feed).
+    kind='comment' rows are human conversation; kind='log' rows are system."""
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="activities")
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     text = models.CharField(max_length=300)
+    kind = models.CharField(max_length=10, default="log",
+                            choices=[("log", "Log"), ("comment", "Comment")])
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
         verbose_name_plural = "task activities"
+
+
+class TaskChecklistItem(models.Model):
+    """E1: tickable sub-items inside one task ('the small steps')."""
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="checklist")
+    text = models.CharField(max_length=200)
+    done = models.BooleanField(default=False)
+    order = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                   on_delete=models.SET_NULL)
+
+    class Meta:
+        ordering = ["order", "id"]
 
 
 class TaskTemplate(models.Model):

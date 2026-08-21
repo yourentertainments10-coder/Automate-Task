@@ -154,35 +154,40 @@ to whoever assigned" = ALREADY DONE — score that point).
 
 ## Phase E — Task detail panel + creation & AI
 
-- [ ] **E1 · Task detail slide-over** (teardown §6): ID pill, title,
-      description, assigned to/by, dates, status, category, priority; action
-      rows (In Progress / Complete / Comment / Request change); **Checklist**
-      (tickable sub-items); **Sub-tasks**; **Comments**; **Task Updates**
-      audit feed (we already log TaskActivity — this displays it per-task);
-      attachments list.
-- [ ] **E2 · Creation upgrades:** "In Loop" picker at creation (pre-subscribe
-      colleagues); "Assign more" checkbox to fire several tasks in a row;
-      effort input (A2) in minutes/hours.
-- [ ] **E3 · AI layer** (Claude behind `AI_ENABLED`, deterministic fallback
-      always works):
-        * "Generate with AI Prompt" — natural language → drafted title /
-          description / checklist;
-        * per-task "AI Summarize";
-        * **AI review summary per employee** — the categories Sir dictated:
-          "slow — give one task at a time", "multitasker but below expected
-          speed — train them", "next level — on time every time, make them a
-          trainer/lead, promote", generated from D1–D4 stats so the fallback
-          (no API key) still produces rule-based versions of the same
-          sentences.
+- [x] **E1 · Task detail slide-over** — DONE 21 Aug: click any task row →
+      right-side panel with ID pill, chips (status/category/priority/effort/
+      spent/progress/parent), description, assigned to/by + dates, action
+      row (Status update / Complete / Request change / ✨ Summarize),
+      **Checklist** (add/tick/delete, ✓ logged to the feed, count badge),
+      **Sub-tasks** (Task.parent, one level deep, created via normal task
+      POST with `parent`), **Comments** (kind='comment' on TaskActivity,
+      notifies assignee+creator), **Task Updates feed** (per-task
+      `/activity/`), attachments list. 8 API tests.
+- [x] **E2 · Creation upgrades** — was already live before this phase:
+      In-Loop picker (B7), multi-assignee "each gets their own task"
+      (= Assign more), effort in minutes/hours (A2/B6).
+- [x] **E3 · AI layer** (Claude behind `AI_ENABLED`, deterministic fallback
+      always works — crm/ai_tasks.py, same pattern as intake.ai):
+        * ✨ AI draft in Add Task: prompt → title/description/checklist
+          (checklist lands on every created task); fallback splits steps on
+          `,`/`then`/`aur`/`phir`;
+        * per-task ✨ Summarize in the slide-over;
+        * **AI review summary per employee** in the Employees report (💡
+          line): "Next level — promote", "Multitasker but below expected
+          speed — train", "Slow — one task at a time", "Steady" — pure
+          rules from D1–D4 stats, identical without an API key.
 
 ## Phase F — Managed categories & task settings
 
-- [ ] **F1 · Category management** (teardown §6.3): admin CRUD list with task
-      counts and reorder, replacing today's free-text category field
-      (existing values migrated automatically). Tags: postponed — category
-      covers the meeting's needs; revisit if asked.
-- [ ] **F2 · Task Settings screen** housing B3's evidence toggles + future
-      org-wide task policies.
+- [x] **F1 · Category management** — DONE 21 Aug: Automation Settings page
+      now has the admin category manager — add (name + department), live
+      task counts per category (`?counts=true`), delete = deactivate,
+      re-add = reactivate. (The managed-dropdown core itself shipped in
+      B5.) Reorder skipped — lists sort alphabetically everywhere; add
+      only if Sir asks. Tags: postponed as planned.
+- [x] **F2 · Task Settings screen** — the evidence card in Automation
+      Settings; updated 21 Aug: completion description is now labelled as
+      always-required (P2 org rule), attachment stays a toggle.
 
 ## Phase P — Progress updates & Time Spent (20 Aug requirements doc, part 1)
 
@@ -236,19 +241,29 @@ correction → Dept Head owns repeats → Founder sees only serious escalations.
       15 API tests. Frontend: /mistakes page (register, filters, Action
       Required view, log modal, explain form, repeat prompt, review form,
       corrective-task button, history timeline).
-- [ ] **M3 · AI layer + founder view** (~2 days): Claude (env-gated,
-      existing AI_ENABLED pattern, rule-based fallback) classifies mistake
-      type, spots cross-employee patterns ("5 people made this → question
-      the process, not the people"), suggests CAPA; Founder dashboard =
-      Action Required only (critical, big financial impact, overdue
-      escalations, recurring failures) + concise weekly digest; managers
-      get a daily accountability summary.
-- [ ] **M4 · Scoring** (~2 days, merges with Phase D): employee score adds
-      mistake frequency/repeats/severity/action completion/improvement;
-      department accountability score (repeats, SLA compliance, financial
-      impact, improvement).
-- **Blocked on Sir:** who are the Department Heads (needed for the
-  escalation chain) + the mistake category list + confirm SLA hours.
+- [x] **M3 · AI layer + founder view** — DONE 21 Aug. `mistakes/ai.py`:
+      ✨ Suggest on the review form → classification + reasoning +
+      corrective/preventive (Claude behind AI_ENABLED; rules map root cause
+      → classification, SOP-inadequate always → process; "Use suggestion"
+      fills the form, the manager still saves). `analytics.patterns()`:
+      ≥3 distinct people on one category in 90d → "question the PROCESS,
+      not the people" + repeat-offender list. `founder_summary`: Action
+      Required only (critical/high open, SLA missed, escalated to founder,
+      3rd occurrences, loss this month, process smells) — admin card on
+      the Mistakes page; managers get the patterns + dept-score card.
+      Digests (`digests.py`, run by the ticker, date-guarded): managers —
+      daily accountability summary after 09:00; founder — Monday weekly
+      executive digest. `POST /mistakes/send_digests/` fires them by hand.
+- [x] **M4 · Scoring** — DONE 21 Aug. Employee score (Employees report) =
+      task score − mistake penalty (low 1 / medium 3 / high 6 / critical
+      10, repeats ×2, capped 30) — `task_score`, `mistake_penalty`,
+      `mistakes`, `repeat_mistakes`, `mistake_action_rate` all exposed,
+      formula text updated. Department accountability score
+      (`/mistakes/department_scores/`): 100 − 5/repeat (max 30) −
+      0.3×(100−SLA%) − loss tier (0/10/20) + 5 if ≥20% fewer mistakes
+      than the previous period; breakdown shown in the tooltip. 9 tests.
+- ~~Blocked on Sir~~ resolved 20 Aug: dept heads = the existing managers,
+  category list received (29 seeded), SLA Critical = 4h (configurable).
 
 ## Decisions to confirm with Sir before/while building
 1. **Modification-request approver routing** — the reconciled rule in B2

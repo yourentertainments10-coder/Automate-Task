@@ -92,6 +92,9 @@ class MistakeSettings(models.Model):
     sla_medium_hours = models.PositiveIntegerField(default=48)
     sla_high_hours = models.PositiveIntegerField(default=24)
     sla_critical_hours = models.PositiveIntegerField(default=4)
+    # M3 digest guards — once per day / once per week
+    last_daily_digest = models.DateField(null=True, blank=True)
+    last_weekly_digest = models.DateField(null=True, blank=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL)
     updated_at = models.DateTimeField(auto_now=True)

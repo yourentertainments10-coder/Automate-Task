@@ -5,7 +5,7 @@ from accounts.models import User
 from .models import (
     AssignmentRule, Holiday, Lead, LeadDocument, LeadEvent, Quotation,
     Task, TaskActivity, TaskAttachment, TaskCategory, TaskChangeRequest,
-    TaskSettings, TaskTemplate,
+    TaskChecklistItem, TaskSettings, TaskTemplate,
 )
 
 
@@ -115,13 +115,14 @@ class TaskSerializer(serializers.ModelSerializer):
     subscribed = serializers.SerializerMethodField()
 
     code = serializers.CharField(read_only=True)
+    parent_code = serializers.CharField(source="parent.code", read_only=True, default=None)
     pending_change_requests = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
         fields = [
             "id", "code", "title", "description", "category", "department",
-            "frequency", "frequency_display",
+            "frequency", "frequency_display", "parent", "parent_code",
             "repeat_until", "lead", "lead_name", "group", "group_name",
             "assigned_to", "assigned_to_detail", "created_by_detail",
             "status", "status_display", "priority", "priority_display",
@@ -152,7 +153,13 @@ class TaskActivitySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TaskActivity
-        fields = ["id", "task", "task_title", "actor", "text", "created_at"]
+        fields = ["id", "task", "task_title", "actor", "text", "kind", "created_at"]
+
+
+class TaskChecklistItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskChecklistItem
+        fields = ["id", "text", "done", "order"]
 
 
 class TaskTemplateSerializer(serializers.ModelSerializer):

@@ -95,6 +95,7 @@ export default function Mistakes() {
         </button>
       </div>
       {err && <div className="err">{err}</div>}
+      <InsightsPanel isAdmin={isAdmin} isManager={isAdmin || can('tasks.view_department')} />
       {rows.length === 0 && <p className="muted">Nothing here — clean register. 🎉</p>}
       <div className="task-list">
         {rows.map(m => (
@@ -107,6 +108,84 @@ export default function Mistakes() {
         <LogMistakeModal user={user} canLogOthers={canLog}
           onClose={() => setShowLog(false)}
           onSaved={() => { setShowLog(false); load() }} />
+      )}
+    </div>
+  )
+}
+
+/* M3/M4: founder "Action Required" card, process-pattern smells, dept scores */
+function InsightsPanel({ isAdmin, isManager }) {
+  const [summary, setSummary] = useState(null)
+  const [pats, setPats] = useState(null)
+  const [depts, setDepts] = useState(null)
+  const [open, setOpen] = useState(true)
+  useEffect(() => {
+    if (isAdmin) api('/api/mistakes/founder_summary/').then(setSummary).catch(() => {})
+    if (isManager) {
+      api('/api/mistakes/patterns/?days=90').then(setPats).catch(() => {})
+      api('/api/mistakes/department_scores/?range=this_month').then(setDepts).catch(() => {})
+    }
+  }, [isAdmin, isManager])
+  if (!isManager) return null
+  const smells = pats?.categories?.filter(c => c.process_suspect) || []
+  return (
+    <div className="rule-card" style={{ marginBottom: 14 }}>
+      <div className="rule-head" style={{ cursor: 'pointer' }} onClick={() => setOpen(o => !o)}>
+        <h3>{isAdmin ? '⚑ Action required (founder view)' : '📊 Team insights'} {open ? '▾' : '▸'}</h3>
+      </div>
+      {open && (
+        <>
+          {summary && (
+            <div className="stats" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+              <div className={'stat' + (summary.critical_open ? ' alert' : '')}><div className="label">Critical open</div><div className="value">{summary.critical_open}</div></div>
+              <div className={'stat' + (summary.sla_missed ? ' alert' : '')}><div className="label">SLA missed</div><div className="value">{summary.sla_missed}</div></div>
+              <div className={'stat' + (summary.escalated_to_founder ? ' alert' : '')}><div className="label">Escalated to you</div><div className="value">{summary.escalated_to_founder}</div></div>
+              <div className="stat"><div className="label">3rd occurrences</div><div className="value">{summary.level3_open}</div></div>
+              <div className="stat"><div className="label">Loss this month</div><div className="value">₹{Number(summary.loss_this_month).toLocaleString('en-IN')}</div></div>
+              <div className="stat"><div className="label">Open total</div><div className="value">{summary.open_total}</div></div>
+            </div>
+          )}
+          {smells.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <strong className="small">Process smells (90 days) — fix the process, not the people</strong>
+              {smells.map(c => (
+                <div key={c.category} className="small" style={{ padding: '3px 0' }}>
+                  🔁 <strong>{c.category}</strong> — {c.message}
+                  {c.financial_loss > 0 && <> ₹{Number(c.financial_loss).toLocaleString('en-IN')} loss.</>}
+                </div>
+              ))}
+            </div>
+          )}
+          {pats?.repeat_offenders?.length > 0 && (
+            <div className="small muted" style={{ marginTop: 6 }}>
+              Repeat (90d): {pats.repeat_offenders.slice(0, 5).map(o => `${o.name} ×${o.count} ${o.category}`).join(' · ')}
+            </div>
+          )}
+          {depts?.rows?.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <strong className="small" title={depts.formula}>Department accountability score (this month) ⓘ</strong>
+              <table className="table" style={{ maxWidth: 720, marginTop: 4 }}>
+                <thead><tr><th>Department</th><th>Score</th><th>Mistakes</th><th>Repeats</th><th>SLA</th><th>Loss</th><th>vs last period</th></tr></thead>
+                <tbody>
+                  {depts.rows.map(r => (
+                    <tr key={r.department}>
+                      <td><strong>{r.label}</strong></td>
+                      <td title={`−${r.breakdown.repeat_penalty} repeats · −${r.breakdown.sla_penalty} SLA · −${r.breakdown.loss_penalty} loss · +${r.breakdown.improvement_bonus} improvement`}>
+                        <strong>{r.score}</strong></td>
+                      <td>{r.mistakes}</td>
+                      <td className={r.repeats ? 'late' : ''}>{r.repeats}</td>
+                      <td>{r.sla_compliance ?? '—'}{r.sla_compliance != null && '%'}</td>
+                      <td>{r.financial_loss ? `₹${Number(r.financial_loss).toLocaleString('en-IN')}` : '—'}</td>
+                      <td className={r.improvement_pct > 0 ? 'ok' : r.improvement_pct < 0 ? 'late' : ''}>
+                        {r.improvement_pct == null ? '—' : `${r.improvement_pct > 0 ? '▼' : '▲'} ${Math.abs(r.improvement_pct)}%`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -297,7 +376,20 @@ function ReviewForm({ m, onPost }) {
   })
   const [task, setTask] = useState(false)
   const [taskTitle, setTaskTitle] = useState('')
+  const [hint, setHint] = useState(null)     // M3: AI/rules suggestion
   const set = k => e => setF(p => ({ ...p, [k]: e.target.value }))
+  const askSuggestion = async () => {
+    try {
+      const s = await api(`/api/mistakes/${m.id}/ai_suggest/`, { method: 'POST' })
+      setHint(s)
+    } catch { setHint({ reasoning: 'Could not fetch a suggestion.' }) }
+  }
+  const useHint = () => setF(p => ({
+    ...p,
+    classification: hint.classification || p.classification,
+    manager_remarks: p.manager_remarks
+      || `Corrective: ${hint.corrective_action} Preventive: ${hint.preventive_action}`,
+  }))
   const setB = k => e => setF(p => ({ ...p, [k]: e.target.value === '' ? null : e.target.value === 'yes' }))
   const body = (resolve) => ({
     ...f,
@@ -306,7 +398,26 @@ function ReviewForm({ m, onPost }) {
   })
   return (
     <div style={{ marginTop: 8, padding: 10, background: 'var(--bg)', borderRadius: 8 }}>
-      <strong className="small">Manager review — a review is a decision, not a click</strong>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <strong className="small">Manager review — a review is a decision, not a click</strong>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn btn-sm" onClick={askSuggestion}
+          title="Suggests classification + corrective/preventive action — you still decide">✨ Suggest</button>
+      </div>
+      {hint && (
+        <div className="small" style={{ margin: '6px 0', padding: 8, background: 'rgba(13,122,95,.08)', borderRadius: 6 }}>
+          {hint.classification && <><strong>Suggested:</strong> {CLASSIFICATIONS.find(([v]) => v === hint.classification)?.[1]} — </>}
+          {hint.reasoning}
+          {hint.corrective_action && <><br /><strong>Corrective:</strong> {hint.corrective_action}</>}
+          {hint.preventive_action && <><br /><strong>Preventive:</strong> {hint.preventive_action}</>}
+          {hint.classification && (
+            <div style={{ marginTop: 4 }}>
+              <button type="button" className="btn btn-sm" onClick={useHint}>Use suggestion</button>
+              <span className="muted"> ({hint.provider})</span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="form-grid" style={{ marginTop: 6 }}>
         <div>
           <label>What failed? *</label>

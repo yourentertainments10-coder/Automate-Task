@@ -85,5 +85,8 @@ def send_followup_reminders() -> int:
     sent += send_task_reminders()
     purge_expired_attachments()
     from mistakes.sla import escalate_overdue_mistakes  # lazy: avoids app-load cycles
+    from mistakes.digests import send_daily_manager_summaries, send_weekly_founder_digest
     escalate_overdue_mistakes()
+    send_daily_manager_summaries()      # date-guarded: once a day after 09:00
+    send_weekly_founder_digest()        # date-guarded: Mondays only
     return sent

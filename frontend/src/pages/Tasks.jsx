@@ -6,6 +6,7 @@ import { Bar } from 'react-chartjs-2'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
 import Directory from './Directory'
+import TaskDetailPanel from './TaskDetail'
 import { ChangeRequests, CompleteModal, DeletedTasks, ProgressModal, RequestChangeModal, WorkloadPanel } from './TaskExtras'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
@@ -294,6 +295,7 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
   const [completing, setCompleting] = useState(null)   // task in the evidence modal
   const [progressFor, setProgressFor] = useState(null) // task in the status-update modal (P1)
   const [requestFor, setRequestFor] = useState(null)   // task in the request-change modal
+  const [detailFor, setDetailFor] = useState(null)     // task in the detail slide-over (E1)
 
   const load = useCallback(() => {
     const p = new URLSearchParams({ page_size: '200', scope })
@@ -384,7 +386,8 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
               title={t.assigned_to !== user.id ? 'Only the assignee can complete this task'
                 : t.status === 'done' ? 'Reopen' : 'Mark done'}
             />
-            <div className="task-main">
+            <div className="task-main" style={{ cursor: 'pointer' }}
+              title="Open task details" onClick={() => setDetailFor(t)}>
               <div className="task-title">
                 <span className="t-code">{t.code}</span>
                 {t.title}
@@ -467,6 +470,10 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
           onClose={() => setProgressFor(null)}
           onDone={() => { setProgressFor(null); load() }} />
       )}
+      {detailFor && (
+        <TaskDetailPanel taskId={detailFor.id} user={user} team={team} settings={settings}
+          onClose={() => setDetailFor(null)} onChanged={load} />
+      )}
       {requestFor && (
         <RequestChangeModal task={requestFor} team={team} user={user}
           isAdmin={user.capabilities?.includes('tasks.view_all')}
@@ -545,9 +552,24 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
   const [inLoop, setInLoop] = useState([])          // Loop: colleagues who follow the task
   const [newCat, setNewCat] = useState(null)        // null = closed, '' = typing
   const [workloads, setWorkloads] = useState([])    // C1: pipeline per picked assignee
+  const [aiPrompt, setAiPrompt] = useState(null)    // E3: null = closed
+  const [aiChecklist, setAiChecklist] = useState([])
+  const [aiBusy, setAiBusy] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const set = k => e => setF(prev => ({ ...prev, [k]: e.target.value }))
+
+  const aiDraft = async () => {
+    if (!aiPrompt?.trim()) return
+    setAiBusy(true); setErr('')
+    try {
+      const d = await api('/api/tasks/ai_draft/', { method: 'POST', body: { prompt: aiPrompt } })
+      setF(prev => ({ ...prev, title: d.title, description: d.description }))
+      setAiChecklist(d.checklist || [])
+      setAiPrompt(null)
+    } catch (ex) { setErr(errorText(ex.data) || ex.message) }
+    finally { setAiBusy(false) }
+  }
 
   // C1: whoever is picked, show their current pipeline (informs, never blocks)
   useEffect(() => {
@@ -601,10 +623,15 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
     let created = 0
     try {
       for (const id of assignees) {
-        await api('/api/tasks/', {
+        const made = await api('/api/tasks/', {
           method: 'POST',
           body: { ...base, assigned_to: id, in_loop: inLoop.filter(x => x !== id) },
         })
+        // E3: the AI-drafted checklist lands on every created task
+        for (const step of aiChecklist) {
+          await api(`/api/tasks/${made.id}/add_check/`, { method: 'POST', body: { text: step } })
+            .catch(() => {})
+        }
         created += 1
       }
       onSaved()
@@ -617,7 +644,31 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
   return (
     <div className="modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <form className="modal-card" onSubmit={submit}>
-        <h2>{template ? `New task from "${template.name}"` : 'Add Task'}</h2>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {template ? `New task from "${template.name}"` : 'Add Task'}
+          <span style={{ flex: 1 }} />
+          <button type="button" className="btn btn-sm"
+            title="Describe the task in your words — AI drafts title, description & checklist"
+            onClick={() => setAiPrompt(p => p === null ? '' : null)}>✨ AI draft</button>
+        </h2>
+        {aiPrompt !== null && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            <input value={aiPrompt} autoFocus style={{ flex: 1 }}
+              placeholder="e.g. Ravi ko brake pads ke baare mein call karo, phir quotation bhejo"
+              onChange={e => setAiPrompt(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); aiDraft() } }} />
+            <button type="button" className="btn btn-sm btn-primary" disabled={aiBusy}
+              onClick={aiDraft}>{aiBusy ? '…' : 'Generate'}</button>
+          </div>
+        )}
+        {aiChecklist.length > 0 && (
+          <p className="small muted" style={{ marginBottom: 8 }}>
+            ✨ Checklist draft ({aiChecklist.length} steps) will be added to the task:
+            {' '}{aiChecklist.join(' · ')}
+            <button type="button" className="btn btn-sm" style={{ marginLeft: 6 }}
+              onClick={() => setAiChecklist([])}>✕</button>
+          </p>
+        )}
         <div className="form-grid">
           <div className="wide">
             <label>Title *</label>
@@ -1041,9 +1092,11 @@ function EmployeesReport() {
                   {r.multitask_days >= 3 && (r.multitask_on_time ?? 0) >= 70 && (
                     <span className="ai-chip" title={`${r.multitask_days} days with 3+ parallel tasks, ${r.multitask_on_time}% of them finished on time`}>🤹 Multitasker</span>
                   )}
+                  {r.review && <div className="muted small">💡 {r.review}</div>}
                 </td>
-                <td title={`${data.formula}\nOn-time: ${r.on_time_rate ?? '—'}% · Effort earned: ${r.effort_ratio ?? '—'}%`}>
+                <td title={`${data.formula}\nOn-time: ${r.on_time_rate ?? '—'}% · Effort earned: ${r.effort_ratio ?? '—'}%\nTask score ${r.task_score ?? '—'} − mistakes ${r.mistake_penalty ?? 0} (${r.mistakes ?? 0} logged, ${r.repeat_mistakes ?? 0} repeat)`}>
                   <strong>{r.score ?? '—'}</strong>
+                  {r.mistake_penalty > 0 && <div className="small late">−{r.mistake_penalty} mistakes</div>}
                 </td>
                 <td>{r.total}</td>
                 <td className={r.overdue ? 'late' : ''}>{r.overdue}</td>

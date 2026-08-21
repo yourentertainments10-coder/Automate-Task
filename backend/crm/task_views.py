@@ -13,10 +13,11 @@ from accounts.models import User
 from accounts.permissions import HasCapability, has_capability
 from notifications.service import notify
 
+from .ai_tasks import draft_task, review_sentence, summarize_task
 from .models import (
     ChangeRequestStatus, EventType, Holiday, LeadEvent, Task, TaskActivity,
-    TaskAttachment, TaskCategory, TaskChangeRequest, TaskFrequency,
-    TaskSettings, TaskStatus, TaskTemplate,
+    TaskAttachment, TaskCategory, TaskChangeRequest, TaskChecklistItem,
+    TaskFrequency, TaskSettings, TaskStatus, TaskTemplate,
 )
 from .scoping import (
     assignable_users, can_assign_to, can_edit_task, visible_leads, visible_tasks,
@@ -218,6 +219,13 @@ class TaskViewSet(viewsets.ModelViewSet):
             user,
             serializer.validated_data.get("department", ""),
             serializer.validated_data.get("category", ""))
+        # E1: sub-tasks are one level deep and only under tasks you can see
+        parent = serializer.validated_data.get("parent")
+        if parent:
+            if parent.deleted_at or not visible_tasks(user).filter(pk=parent.pk).exists():
+                raise ValidationError({"parent": "Unknown parent task."})
+            if parent.parent_id:
+                raise ValidationError({"parent": "Sub-tasks can't have their own sub-tasks."})
         lead = serializer.validated_data.get("lead")
         if lead and not visible_leads(user).filter(pk=lead.pk).exists():
             raise PermissionDenied("You cannot link a task to a lead you cannot see.")
@@ -352,6 +360,97 @@ class TaskViewSet(viewsets.ModelViewSet):
         task.save(update_fields=["deleted_at"])
         act(task, request.user, "Restored from Deleted Tasks")
         return Response(TaskSerializer(task, context={"request": request}).data)
+
+    def retrieve(self, request, *args, **kwargs):
+        """E1: the detail slide-over gets checklist + sub-tasks inline."""
+        data = super().retrieve(request, *args, **kwargs).data
+        task = self.get_object()
+        from .serializers import TaskChecklistItemSerializer
+        data["checklist"] = TaskChecklistItemSerializer(task.checklist.all(), many=True).data
+        data["subtasks"] = [
+            {"id": s.id, "code": s.code, "title": s.title, "status": s.status,
+             "assignee": s.assigned_to.get_full_name() or s.assigned_to.username}
+            for s in task.subtasks.select_related("assigned_to").filter(deleted_at__isnull=True)
+        ]
+        return Response(data)
+
+    def _can_touch_detail(self, user, task) -> bool:
+        return (user.pk in (task.assigned_to_id, task.created_by_id)
+                or has_capability(user, "tasks.view_all"))
+
+    # ---- E1: checklist / comments / per-task feed ------------------------
+    @action(detail=True, methods=["get"])
+    def activity(self, request, pk=None):
+        """Task Updates feed — system logs + comments for ONE task."""
+        acts = self.get_object().activities.select_related("actor")[:100]
+        return Response(TaskActivitySerializer(acts, many=True).data)
+
+    @action(detail=True, methods=["post"])
+    def comment(self, request, pk=None):
+        task = self.get_object()
+        text = str(request.data.get("text", "")).strip()
+        if not text:
+            raise ValidationError({"text": "Say something."})
+        TaskActivity.objects.create(task=task, actor=request.user,
+                                    text=text[:300], kind="comment")
+        for target in (task.assigned_to, task.created_by):
+            if target and target.is_active and target.pk != request.user.pk:
+                notify(target, "task_comment",
+                       f"💬 {task.code}: {request.user.get_full_name() or request.user.username}",
+                       text[:300], link="/tasks")
+        acts = task.activities.select_related("actor")[:100]
+        return Response(TaskActivitySerializer(acts, many=True).data,
+                        status=http.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def add_check(self, request, pk=None):
+        task = self.get_object()
+        if not self._can_touch_detail(request.user, task):
+            raise PermissionDenied("Only the assignee, creator or admin can edit the checklist.")
+        text = str(request.data.get("text", "")).strip()
+        if not text:
+            raise ValidationError({"text": "Checklist item text is required."})
+        last = task.checklist.order_by("-order").first()
+        TaskChecklistItem.objects.create(task=task, text=text[:200],
+                                         order=(last.order + 1) if last else 0,
+                                         created_by=request.user)
+        from .serializers import TaskChecklistItemSerializer
+        return Response(TaskChecklistItemSerializer(task.checklist.all(), many=True).data,
+                        status=http.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="check/(?P<item_id>[0-9]+)")
+    def check(self, request, pk=None, item_id=None):
+        """Toggle one checklist item (or ?delete=true removes it)."""
+        task = self.get_object()
+        if not self._can_touch_detail(request.user, task):
+            raise PermissionDenied("Only the assignee, creator or admin can edit the checklist.")
+        item = task.checklist.filter(pk=item_id).first()
+        if not item:
+            raise ValidationError({"detail": "Unknown checklist item."})
+        if request.query_params.get("delete") == "true":
+            item.delete()
+        else:
+            item.done = not item.done
+            item.save(update_fields=["done"])
+            if item.done:
+                act(task, request.user, f"Checklist ✓ {item.text[:120]}")
+        from .serializers import TaskChecklistItemSerializer
+        return Response(TaskChecklistItemSerializer(task.checklist.all(), many=True).data)
+
+    # ---- E3: AI layer (Claude behind AI_ENABLED, rules otherwise) --------
+    @action(detail=False, methods=["post"])
+    def ai_draft(self, request):
+        """'Generate with AI Prompt': natural language -> title/description/
+        checklist draft. Never blocks — falls back to rules."""
+        prompt = str(request.data.get("prompt", "")).strip()
+        if not prompt:
+            raise ValidationError({"prompt": "Describe the task in your own words."})
+        return Response(draft_task(prompt))
+
+    @action(detail=True, methods=["post"])
+    def summarize(self, request, pk=None):
+        task = self.get_object()
+        return Response(summarize_task(task, list(task.activities.all()[:15])))
 
     # ---- extra actions ---------------------------------------------------
     @action(detail=False, methods=["get"])
@@ -666,7 +765,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             elif on_time_rate is not None:   # no effort values set anywhere
                 score = round(100 * on_time_rate, 1)
 
-            rows.append({
+            row = {
                 "user": uid, "name": name_of[uid], "total": len(sub),
                 **{k: c.get(k, 0) for k in ("overdue", "pending", "in_progress",
                                             "completed", "in_time", "delayed")},
@@ -678,12 +777,29 @@ class TaskViewSet(viewsets.ModelViewSet):
                 "score": score,
                 "multitask_days": len(mt_days),
                 "multitask_on_time": round(100 * mt_in_time / mt_done, 1) if mt_done else None,
-            })
+            }
+            row["review"] = review_sentence(row)   # E3: Sir's review categories
+            rows.append(row)
+
+        # M4: mistakes pull the score down — transparently
+        from mistakes.analytics import MAX_EMPLOYEE_PENALTY, mistake_penalties
+        pens = mistake_penalties([r["user"] for r in rows], start, end)
+        for r in rows:
+            pen = pens.get(r["user"], {"mistakes": 0, "repeats": 0, "penalty": 0, "action_rate": None})
+            r["mistakes"] = pen["mistakes"]
+            r["repeat_mistakes"] = pen["repeats"]
+            r["mistake_penalty"] = pen["penalty"]
+            r["mistake_action_rate"] = pen["action_rate"]
+            r["task_score"] = r["score"]
+            r["score"] = (round(max(0, r["score"] - pen["penalty"]), 1)
+                          if r["score"] is not None else None)
         rows.sort(key=lambda r: (-(r["score"] or -1), r["name"]))
         return Response({
             "rows": rows,
             "formula": f"Score = {self.SCORE_ON_TIME_WEIGHT} × on-time rate + "
-                       f"{self.SCORE_EFFORT_WEIGHT} × (time earned ÷ time assigned)",
+                       f"{self.SCORE_EFFORT_WEIGHT} × (time earned ÷ time assigned) "
+                       f"− mistake penalty (low 1 · medium 3 · high 6 · critical 10, "
+                       f"repeats ×2, max {MAX_EMPLOYEE_PENALTY})",
         })
 
     @action(detail=False, methods=["get"])
@@ -1037,6 +1153,17 @@ class TaskCategoryViewSet(viewsets.ModelViewSet):
         if department is not None:
             qs = qs.filter(_Q(department="") | _Q(department=department))
         return qs
+
+    def list(self, request, *args, **kwargs):
+        """F1: ?counts=true adds live task counts per category (admin list)."""
+        res = super().list(request, *args, **kwargs)
+        if request.query_params.get("counts") == "true":
+            counts = Counter(c.lower() for c in Task.objects
+                             .filter(deleted_at__isnull=True).exclude(category="")
+                             .values_list("category", flat=True))
+            for row in res.data:
+                row["task_count"] = counts.get(row["name"].lower(), 0)
+        return res
 
     def create(self, request, *args, **kwargs):
         # re-adding a deactivated category reactivates it instead of

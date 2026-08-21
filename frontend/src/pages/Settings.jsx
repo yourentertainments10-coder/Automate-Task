@@ -36,11 +36,7 @@ export default function Settings() {
             "just keeps ticking it daily" problem.
           </p>
           <div className="rule-members" style={{ gap: 18 }}>
-            <label className="switch">
-              <input type="checkbox" checked={taskCfg.require_completion_remarks}
-                onChange={e => setPolicy('require_completion_remarks', e.target.checked)} />
-              <span>Remarks required</span>
-            </label>
+            <span className="muted small">✓ Completion description: <strong>always required</strong> (org rule, not a toggle)</span>
             <label className="switch">
               <input type="checkbox" checked={taskCfg.require_completion_attachment}
                 onChange={e => setPolicy('require_completion_attachment', e.target.checked)} />
@@ -49,6 +45,7 @@ export default function Settings() {
           </div>
         </div>
       )}
+      <CategoryManager onError={setErr} />
       <p className="muted" style={{ marginBottom: 16 }}>
         Auto-assignment rules: when a new lead arrives without an assignee (manual entry,
         or WhatsApp/Gmail/AI intake in Phase 3), the rule for its department picks the owner.
@@ -59,6 +56,67 @@ export default function Settings() {
           rule={rules.find(r => r.department === dept)}
           team={team} onChanged={load} onError={setErr} />
       ))}
+    </div>
+  )
+}
+
+/* F1: managed task categories — admin CRUD with live task counts */
+function CategoryManager({ onError }) {
+  const [cats, setCats] = useState(null)
+  const [f, setF] = useState({ name: '', department: '' })
+
+  const load = () => api('/api/task-categories/?counts=true')
+    .then(setCats).catch(e => onError(e.message))
+  useEffect(() => { load() }, [])
+
+  const add = async () => {
+    onError('')
+    try {
+      await api('/api/task-categories/', { method: 'POST', body: f })
+      setF({ name: '', department: '' }); load()
+    } catch (e) { onError(errorText(e.data) || e.message) }
+  }
+  const remove = async (c) => {
+    onError('')
+    try { await api(`/api/task-categories/${c.id}/`, { method: 'DELETE' }); load() }
+    catch (e) { onError(errorText(e.data) || e.message) }
+  }
+
+  return (
+    <div className="rule-card">
+      <div className="rule-head"><h3>Task categories</h3></div>
+      <p className="muted small">
+        The dropdown employees pick from (managers can also add inline while
+        creating a task). Deleting hides a category from the dropdown —
+        existing tasks keep their history; re-adding the name brings it back.
+      </p>
+      <div className="filters">
+        <input placeholder="New category name" value={f.name}
+          onChange={e => setF(p => ({ ...p, name: e.target.value }))} />
+        <select value={f.department} onChange={e => setF(p => ({ ...p, department: e.target.value }))}>
+          <option value="">General (all departments)</option>
+          {DEPARTMENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          <option value="hr">Human Resources</option>
+        </select>
+        <button className="btn btn-primary" disabled={!f.name.trim()} onClick={add}>Add</button>
+      </div>
+      {cats && (
+        <table className="table" style={{ maxWidth: 560 }}>
+          <thead><tr><th>Category</th><th>Department</th><th>Tasks</th><th /></tr></thead>
+          <tbody>
+            {cats.map(c => (
+              <tr key={c.id}>
+                <td><strong>{c.name}</strong></td>
+                <td>{c.department_display || 'General'}</td>
+                <td>{c.task_count ?? 0}</td>
+                <td className="row-actions">
+                  <button className="btn btn-sm" onClick={() => remove(c)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }

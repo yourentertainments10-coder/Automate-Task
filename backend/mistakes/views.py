@@ -337,6 +337,59 @@ class MistakeViewSet(viewsets.ModelViewSet):
     def events(self, request, pk=None):
         return Response(MistakeEventSerializer(self.get_object().events.all(), many=True).data)
 
+    # ---- M3: AI assistance + patterns + founder view ---------------------
+    @action(detail=True, methods=["post"])
+    def ai_suggest(self, request, pk=None):
+        """Suggests classification + CAPA for the reviewer — a human still
+        saves it. Claude behind AI_ENABLED; rule-based otherwise."""
+        from .ai import suggest
+        mistake = self.get_object()
+        if not can_review(request.user, mistake):
+            raise PermissionDenied("Only the reviewer can ask for suggestions.")
+        return Response(suggest(mistake))
+
+    @action(detail=False, methods=["get"])
+    def patterns(self, request):
+        """Cross-employee repeat detection over the caller's scope."""
+        from .analytics import patterns
+        if not (has_capability(request.user, "tasks.view_all")
+                or has_capability(request.user, "tasks.view_department")):
+            raise PermissionDenied("Managers and admin only.")
+        try:
+            days = max(7, min(int(request.query_params.get("days", 90)), 365))
+        except (TypeError, ValueError):
+            days = 90
+        return Response(patterns(days, queryset=self.get_queryset()))
+
+    @action(detail=False, methods=["get"])
+    def founder_summary(self, request):
+        """Action Required only — critical, SLA misses, escalations, level-3,
+        this month's loss, process smells, repeat offenders."""
+        from .analytics import founder_summary
+        if not has_capability(request.user, "tasks.view_all"):
+            raise PermissionDenied("Founder/admin view only.")
+        return Response(founder_summary())
+
+    @action(detail=False, methods=["get"])
+    def department_scores(self, request):
+        """M4: accountability score per department, fully explained."""
+        from crm.task_views import _range_bounds
+        from .analytics import department_scores
+        if not (has_capability(request.user, "tasks.view_all")
+                or has_capability(request.user, "tasks.view_department")):
+            raise PermissionDenied("Managers and admin only.")
+        start, end = _range_bounds(request.query_params.get("range", "this_month"), timezone.now())
+        return Response(department_scores(start, end))
+
+    @action(detail=False, methods=["post"])
+    def send_digests(self, request):
+        """Admin: fire the daily/weekly digests now (testing / manual run)."""
+        from .digests import send_daily_manager_summaries, send_weekly_founder_digest
+        if not has_capability(request.user, "tasks.view_all"):
+            raise PermissionDenied("Admin only.")
+        return Response({"daily": send_daily_manager_summaries(force=True),
+                         "weekly": send_weekly_founder_digest(force=True)})
+
 
 class MistakeCategoryViewSet(viewsets.ModelViewSet):
     """Configurable categories — everyone reads, admins add/edit."""

@@ -252,12 +252,17 @@ All under `/api/`, JWT `Authorization: Bearer <token>` unless noted.
 | `tasks/workload/?user=<id>` | GET | can-assign-to target · reporting manager · dept/all viewers | C1/C2 pipeline panel: open count, priority breakdown, pending effort, overdue, soft `overloaded` flag (≥8h or ≥10 open) — informs, never blocks |
 | `tasks/{id}/estimate/` | POST | assignee, once | counter-estimate in minutes |
 | `tasks/{id}/progress/` | POST | assignee | repeatable status update: % done, effort spent so far, comment — logs to activity, notifies creator |
+| `tasks/{id}/activity\|comment\|add_check\|check/{item}/` | GET/POST | visible · assignee/creator/admin for checklist | per-task feed, comments (notify assignee+creator), checklist add/toggle/delete |
+| `tasks/ai_draft/` · `tasks/{id}/summarize/` | POST | any | E3 AI layer (Claude behind AI_ENABLED, rule-based fallback): prompt→title/description/checklist · per-task summary |
 | `tasks/{id}/complete/` | POST | assignee | complete: description + actual effort spent MANDATORY, proof file per settings |
 | `tasks/time_report/?range=` | GET | self · dept (manager) · all (admin) | Time Earned (assigned effort) vs Time Spent (actual) per person |
 | `tasks/employees_report/?range=&grain=` | GET | self · dept (manager) · all (admin) | per-person counts+%, transparent score (60/40 formula), multitasker index; `grain=daily` = completion-day crediting; `range=custom&start&end` |
 | `tasks/effort_disputes/?range=` | GET | self · dept (manager) · all (admin) | effort vs estimate vs actual, sorted by disagreement |
 | `mistakes/` + `/{id}/` | CRUD | own · dept (manager) · all (admin) · `?important=true` founder filter | Mistake Register: category, severity (SLA), classification, SOP linking, financial loss |
 | `mistakes/{id}/explain\|confirm_repeat\|review\|create_task\|events/` | POST/GET | employee · manager · manager · manager · visible | 3-level accountability: structured root cause; "Same/Different error"; review (can't just close); corrective task; audit trail |
+| `mistakes/{id}/ai_suggest/` | POST | reviewer | M3: suggested classification + CAPA (Claude behind AI_ENABLED, rules otherwise) — human saves |
+| `mistakes/patterns/?days=` · `mistakes/founder_summary/` · `mistakes/department_scores/?range=` | GET | managers/admin · admin · managers/admin | cross-employee process smells + repeat offenders · Action-Required card · M4 department accountability score |
+| `mistakes/send_digests/` | POST | admin | fire the daily manager summary + weekly founder digest now (ticker sends them automatically) |
 | `mistake-categories/` | GET · CUD | read any · write `settings.manage` | 29 seeded configurable categories |
 | `mistake-settings/` | GET · POST | any · `settings.manage` | SLA hours per severity (72/48/24/4 defaults) |
 | `tasks/{id}/request_change/` | GET/POST | assignee/creator/admin | raise a Modification Request |
