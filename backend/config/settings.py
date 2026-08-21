@@ -23,7 +23,7 @@ def env(name, default=""):
 
 SECRET_KEY = env("SECRET_KEY", "dev-only-insecure-key-change-me")
 DEBUG = env("DEBUG", "true").lower() == "true"
-ALLOWED_HOSTS = [h for h in env("ALLOWED_HOSTS", "*").split(",") if h]
+ALLOWED_HOSTS = [h for h in env("ALLOWED_HOSTS", "automatetask.onrender.com").split(",") if h]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -150,6 +150,16 @@ WHITENOISE_INDEX_FILE = True                    # "/" -> index.html
 # --- production hardening (all inert while DEBUG=true locally) -------------
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # behind Render's proxy
 CSRF_TRUSTED_ORIGINS = [o for o in env("CSRF_TRUSTED_ORIGINS", "").split(",") if o]
+
+# Render injects the service's REAL hostname — trust it automatically so a
+# renamed service (or a mistyped ALLOWED_HOSTS env var) can never cause the
+# every-request-400 DisallowedHost failure again.
+_render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if _render_host:
+    if _render_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_render_host)
+    if f"https://{_render_host}" not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(f"https://{_render_host}")
 if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True

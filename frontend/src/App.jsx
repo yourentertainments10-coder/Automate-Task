@@ -19,12 +19,14 @@ import Ideas from './pages/Ideas'
 import Forms from './pages/Forms'
 import PublicForm from './pages/PublicForm'
 import HR from './pages/HR'
+import Mistakes from './pages/Mistakes'
 
 /* Page titles for the mobile top bar */
 const TITLES = {
   '/': 'Dashboard', '/leads': 'Leads', '/tasks': 'Tasks', '/groups': 'Groups',
   '/notices': 'Notices', '/links': 'Links', '/ideas': 'Idea Board',
-  '/forms': 'Forms', '/hr': 'Attendance', '/notifications': 'Notifications',
+  '/forms': 'Forms', '/hr': 'Attendance', '/mistakes': 'Mistake Register',
+  '/notifications': 'Notifications',
   '/intake': 'AI Inbox', '/users': 'My Team', '/settings': 'Automation',
 }
 
@@ -78,6 +80,7 @@ function Shell({ children }) {
           <NavLink to="/ideas">Idea Board</NavLink>
           <NavLink to="/forms">Forms</NavLink>
           <NavLink to="/hr">Attendance</NavLink>
+          <NavLink to="/mistakes">Mistakes</NavLink>
           <NavLink to="/notifications">
             Notifications {unread > 0 && <span className="badge">{unread}</span>}
           </NavLink>
@@ -128,6 +131,7 @@ export default function App() {
           <Route path="/ideas" element={<Protected><Ideas /></Protected>} />
           <Route path="/forms" element={<Protected><Forms /></Protected>} />
           <Route path="/hr" element={<Protected><HR /></Protected>} />
+          <Route path="/mistakes" element={<Protected><Mistakes /></Protected>} />
           <Route path="/notifications" element={
             <Protected>{({ refreshUnread }) => <Notifications onCountChange={refreshUnread} />}</Protected>
           } />

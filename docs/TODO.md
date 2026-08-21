@@ -213,24 +213,31 @@ Sir's spec: convert the app into Mistake + Accountability + Escalation +
 Performance management. Employee owns the mistake → Manager owns the
 correction → Dept Head owns repeats → Founder sees only serious escalations.
 
-- [ ] **M1 · Register core** (~3-4 days): `Mistake` model (employee, dept,
-      manager, linked task/lead, category, severity, classification —
-      Human/Process/System/Management/External, impact + financial loss,
-      root cause, corrective + preventive action, due date, evidence file,
-      explanation, manager remarks, status) + `MistakeEvent` full audit
-      trail + CRUD APIs with role-scoped visibility + auto-create
-      correction/audit task (completing it updates the mistake) + notify()
-      fan-out + employee/manager list views.
-- [ ] **M2 · Repeat detection + 3-level flow + SLA escalation** (~2-3 days):
-      occurrence levels (1: explain+correct, manager reviews; 2: Repeat
-      Error — root cause + CAPA mandatory, manager accountable; 3:
-      Performance Escalation to dept head; discipline stays human-approved).
-      Rule-based similarity first (same employee + category + process/SKU
-      keywords) with MANAGER CONFIRMATION before marking repeat; escalation
-      path = reporting_manager chain (employee → TL/manager → dept head →
-      admin/founder). SLA deadlines by severity (Low 72h / Med 48h / High
-      24h / Critical 4h) checked by the existing reminder ticker; missed
-      SLA auto-escalates one level up.
+- [x] **M1 · Register core** — DONE 20 Aug. New `mistakes` app: `Mistake`
+      model (all spec fields incl. SOP linking: name/version/step/
+      followed/adequate — "followed=NO" = employee side, "adequate=NO" =
+      fix the process), `MistakeEvent` permanent audit trail,
+      `MistakeCategory` (29 seeded from Sir's list, admin add/edit, delete
+      deactivates), `MistakeSettings` (configurable SLA hours). Role-scoped
+      visibility (employee own / manager dept+reports / admin all +
+      `?important=true` founder filter). Corrective-task integration both
+      ways (create from mistake; completing the task logs back + notifies
+      the manager). HIGH/CRITICAL notify founder at once; MEDIUM/LOW don't.
+- [x] **M2 · Repeat detection + 3-level flow + SLA escalation** — DONE
+      20 Aug. Candidates suggested (same employee + category, last 365d),
+      manager confirms "Same error"/"Different error" — never automatic.
+      Level 2 = "REPEAT ERROR DETECTED": CAPA (corrective + preventive)
+      mandatory in the employee's explain. Level 3 = "THIRD OCCURRENCE —
+      PERFORMANCE ESCALATION" to dept head with the fixed action list
+      (coaching…PIP…); resolving level 3 REQUIRES a decided human action —
+      the system never punishes on its own. Root cause = structured list
+      (17 options) — "mistake happened" is rejected. Manager can't
+      just click Close: remarks + classification mandatory to resolve.
+      SLA sweep runs with the reminder ticker: missed SLA climbs
+      manager → dept head (manager's manager) → founder, logged each time.
+      15 API tests. Frontend: /mistakes page (register, filters, Action
+      Required view, log modal, explain form, repeat prompt, review form,
+      corrective-task button, history timeline).
 - [ ] **M3 · AI layer + founder view** (~2 days): Claude (env-gated,
       existing AI_ENABLED pattern, rule-based fallback) classifies mistake
       type, spots cross-employee patterns ("5 people made this → question
