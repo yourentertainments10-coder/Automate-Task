@@ -283,6 +283,18 @@ with API tests + browser verification + README update before the next starts.
 
 ---
 
+## 0. Data state (21 Aug)
+
+Demo/test data **wiped on both local SQLite and Neon** via
+`manage.py reset_data --yes`; pre-wipe JSON backups in `backend/backups/`
+(git-ignored). Real team (35 users) loaded from the founder's list —
+password rule `FirstName@2026`, `admin` kept as fallback. Open items:
+- [ ] **No Sales Manager assigned yet** — Sir to say who manages whom;
+      set role + "Reports to" in My Team (needed for mistake escalation
+      chain and reporting-manager visibility).
+- [ ] Two shared emails (accounts@cartrends.co.in ×2, Bijwasan@ ×2) — those
+      four log in by username only.
+
 ## 1. Waiting on the founder / CRM team
 
 ### 1.1 SalaryBox parity check  ⏳ BLOCKED — Anuj to review the SalaryBox admin portal first
