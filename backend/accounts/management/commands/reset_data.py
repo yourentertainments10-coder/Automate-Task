@@ -62,6 +62,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--yes", action="store_true", help="confirm the wipe")
         parser.add_argument("--no-users", action="store_true", help="wipe only")
+        parser.add_argument("--drop-admin", action="store_true",
+                            help="also delete the fallback 'admin' account (real admins exist)")
 
     @transaction.atomic
     def handle(self, *args, **opts):
@@ -115,8 +117,13 @@ class Command(BaseCommand):
                     u.save(update_fields=["is_staff", "is_superuser"])
                 created.append(username)
 
+        kept = "+ admin kept"
+        if opts["drop_admin"] and not opts["no_users"]:
+            User.objects.filter(username="admin").delete()
+            kept = "admin removed — Prateek / NK Jain / Anuj are the admins"
+
         for k, v in wiped.items():
             if v:
                 self.stdout.write(f"  wiped {v:>4}  {k}")
         self.stdout.write(self.style.SUCCESS(
-            f"Done. {len(created)} real users created (+ admin kept)."))
+            f"Done. {len(created)} real users created ({kept})."))

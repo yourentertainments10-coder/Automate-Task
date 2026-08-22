@@ -36,6 +36,7 @@ function Shell({ children }) {
   const location = useLocation()
   const [unread, setUnread] = useState(0)
   const [navOpen, setNavOpen] = useState(false)
+  const [pwOpen, setPwOpen] = useState(false)
 
   const refreshUnread = useCallback(() => {
     api('/api/notifications/unread_count/').then(d => setUnread(d.count)).catch(() => {})
@@ -93,6 +94,7 @@ function Shell({ children }) {
             <div className="who-name">{user.first_name || user.username}</div>
             <div className="who-role">{user.role_display}</div>
           </div>
+          <button className="btn btn-ghost" onClick={() => setPwOpen(true)}>Change password</button>
           <button
             className="btn btn-ghost"
             onClick={async () => { await logout(); navigate('/login') }}
@@ -103,6 +105,59 @@ function Shell({ children }) {
       </aside>
 
       <main className="content">{kids}</main>
+      {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
+    </div>
+  )
+}
+
+/* Self-service password change — the only way anyone (admin included)
+   ever "sees" a password is by setting a new one; stored hashes are unreadable. */
+function ChangePasswordModal({ onClose }) {
+  const [f, setF] = useState({ current: '', next: '', again: '' })
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const set = k => e => setF(p => ({ ...p, [k]: e.target.value }))
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setErr(''); setMsg('')
+    if (f.next !== f.again) { setErr('New passwords do not match.'); return }
+    if (f.next.length < 8) { setErr('Use at least 8 characters.'); return }
+    setBusy(true)
+    try {
+      await api('/api/auth/change-password', {
+        method: 'POST', body: { current_password: f.current, new_password: f.next },
+      })
+      setMsg('Password changed. Use the new one from your next login.')
+      setF({ current: '', next: '', again: '' })
+    } catch (ex) {
+      const d = ex.data || {}
+      setErr(d.detail || Object.values(d).flat().join(' ') || ex.message)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <form className="modal-card" onSubmit={submit} style={{ width: 400 }}>
+        <h2>Change password</h2>
+        <div className="form-grid">
+          <div className="wide"><label>Current password</label>
+            <input type="password" value={f.current} onChange={set('current')} autoFocus required /></div>
+          <div className="wide"><label>New password (8+ characters)</label>
+            <input type="password" value={f.next} onChange={set('next')} required /></div>
+          <div className="wide"><label>New password again</label>
+            <input type="password" value={f.again} onChange={set('again')} required /></div>
+        </div>
+        {err && <div className="err">{err}</div>}
+        {msg && <div className="ok" style={{ marginTop: 8 }}>{msg}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>Close</button>
+          <button className="btn btn-primary" disabled={busy || !f.current || !f.next}>
+            {busy ? 'Saving…' : 'Change password'}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
