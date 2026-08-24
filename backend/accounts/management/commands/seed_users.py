@@ -14,7 +14,7 @@ DEMO_TEAM = [
     ("meera",  "Meera",  "Iyer",   Role.SALES_MANAGER),
     ("vikram", "Vikram", "Rao",    Role.PURCHASE),
     ("anita",  "Anita",  "Desai",  Role.ACCOUNTS),
-    ("karan",  "Karan",  "Mehta",  Role.SUPPORT),
+    ("karan",  "Karan",  "Mehta",  Role.IT_LEAD),
 ]
 
 

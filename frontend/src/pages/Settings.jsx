@@ -3,7 +3,7 @@ import { api, errorText } from '../api'
 
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'Customer Support'], ['management', 'Management'],
+  ['support', 'IT Team'], ['management', 'Management'],
 ]
 
 export default function Settings() {
@@ -96,6 +96,7 @@ function CategoryManager({ onError }) {
         <select value={f.department} onChange={e => setF(p => ({ ...p, department: e.target.value }))}>
           <option value="">General (all departments)</option>
           {DEPARTMENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          <option value="development">Developer Team</option>
           <option value="hr">Human Resources</option>
         </select>
         <button className="btn btn-primary" disabled={!f.name.trim()} onClick={add}>Add</button>

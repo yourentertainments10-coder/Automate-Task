@@ -16,7 +16,7 @@ const LEAD_ATTRS = [
 ]
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'Customer Support'], ['management', 'Management'],
+  ['support', 'IT Team'], ['management', 'Management'],
 ]
 const NEEDS_OPTIONS = ['dropdown', 'radio', 'checkbox']
 

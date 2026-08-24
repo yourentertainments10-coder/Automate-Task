@@ -97,7 +97,7 @@ class UserManagementTests(TestCase):
 
     def test_weak_password_rejected(self):
         self.as_("boss")
-        res = self.client.post("/api/users/", {"username": "weak", "password": "short", "role": "support"})
+        res = self.client.post("/api/users/", {"username": "weak", "password": "short", "role": "it_lead"})
         self.assertEqual(res.status_code, 400)
 
     def test_deactivate_and_activate(self):
@@ -118,9 +118,9 @@ class UserManagementTests(TestCase):
 
     def test_admin_updates_role_without_password(self):
         self.as_("boss")
-        res = self.client.patch(f"/api/users/{self.exec_.id}/", {"role": "support"})
+        res = self.client.patch(f"/api/users/{self.exec_.id}/", {"role": "it_lead"})
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["role"], "support")
+        self.assertEqual(res.data["role"], "it_lead")
         # password unchanged -- login still works
         c2 = APIClient()
         self.assertEqual(c2.post("/api/auth/login", {"username": "neha", "password": "pass@12345"}).status_code, 200)

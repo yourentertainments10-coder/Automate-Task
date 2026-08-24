@@ -11,10 +11,13 @@ from django.db import models
 class Role(models.TextChoices):
     ADMIN = "admin", "Admin"
     SALES_MANAGER = "sales_manager", "Sales Manager"
-    SALES_EXECUTIVE = "sales_executive", "Sales Executive"
+    # There is no customer-support post: product/other support IS the Sales
+    # post; tech support is the IT Lead post. Developer team is separate.
+    SALES_EXECUTIVE = "sales_executive", "Sales"
     PURCHASE = "purchase", "Purchase Team"
     ACCOUNTS = "accounts", "Accounts"
-    SUPPORT = "support", "Customer Support"
+    IT_LEAD = "it_lead", "IT Lead"
+    DEVELOPER = "developer", "Developer"
     HR_MANAGER = "hr_manager", "HR Manager"
 
 
@@ -22,7 +25,8 @@ class Department(models.TextChoices):
     SALES = "sales", "Sales"
     PURCHASE = "purchase", "Purchase"
     ACCOUNTS = "accounts", "Accounts"
-    SUPPORT = "support", "Customer Support"
+    SUPPORT = "support", "IT Team"
+    DEVELOPMENT = "development", "Developer Team"
     HR = "hr", "Human Resources"
     MANAGEMENT = "management", "Management"
 
@@ -33,7 +37,8 @@ ROLE_DEFAULT_DEPARTMENT = {
     Role.SALES_EXECUTIVE: Department.SALES,
     Role.PURCHASE: Department.PURCHASE,
     Role.ACCOUNTS: Department.ACCOUNTS,
-    Role.SUPPORT: Department.SUPPORT,
+    Role.IT_LEAD: Department.SUPPORT,
+    Role.DEVELOPER: Department.DEVELOPMENT,
     Role.HR_MANAGER: Department.HR,
 }
 

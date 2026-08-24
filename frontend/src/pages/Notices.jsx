@@ -14,12 +14,14 @@ const toLocalInput = (iso) => {
 
 const ROLES = [
   ['admin', 'Admin'], ['hr_manager', 'HR Manager'],
-  ['sales_manager', 'Sales Manager'], ['sales_executive', 'Sales Executive'],
-  ['purchase', 'Purchase Team'], ['accounts', 'Accounts'], ['support', 'Customer Support'],
+  ['sales_manager', 'Sales Manager'], ['sales_executive', 'Sales'],
+  ['purchase', 'Purchase Team'], ['accounts', 'Accounts'],
+  ['it_lead', 'IT Lead'], ['developer', 'Developer'],
 ]
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'Customer Support'], ['hr', 'Human Resources'], ['management', 'Management'],
+  ['support', 'IT Team'], ['development', 'Developer Team'],
+  ['hr', 'Human Resources'], ['management', 'Management'],
 ]
 
 export default function Notices() {

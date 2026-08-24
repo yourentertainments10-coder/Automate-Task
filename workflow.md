@@ -51,3 +51,65 @@ Abhi ye switches OFF rakhe hain — Sir se poochh ke on karna, ek click ka kaam 
 T-00024 — har task ka apna number, jaise bill number. Ab bol sakte ho "T-24 ka kya hua?" — naam ki jagah number se baat.
 "9 hours from now" — deadline ab date ki jagah aise dikhti hai, taaki turant samajh aaye kitna time bacha hai / kitna late ho gaya.
 Recurring end date — daily task banate waqt "kab tak repeat ho" ki date de sakte ho. Us din ke baad apne aap band.
+
+
+Score = 60 × On-Time Rate + 40 × Time Efficiency
+On-Time Rate measures how many tasks were completed within the assigned deadline.
+Time Efficiency is calculated using Time Earned ÷ Time Assigned.
+
+dispute tab 
+Amit says: 1 hour
+Bhavna says: 4 hours
+
+The system now shows three values:
+
+Metric	Meaning
+Assigner Said	Time estimated by the person assigning the task
+Assignee Said	Time estimated by the person responsible for completing it
+Actually Took	The actual time spent completing the task
+
+
+Task actions
+
+The panel provides quick actions:
+
+Status Update: change/update the task status
+Complete: mark the task as completed
+Request Change: request a modification to the task
+✨ Summarize: generate a summary of the task
+
+💡 Review Summary in Employees Report
+
+The Employees report now has an AI-style Review Summary underneath each employee.
+
+1. AI Suggestion for Managers
+
+A new ✨ Suggest option has been added to the manager's mistake-review form.
+
+When a manager reviews a mistake, the system can suggest:
+
+Mistake classification
+Reasoning behind the classification
+Root cause
+Corrective action
+Preventive action
+
+The important part is that AI does not make the final decision.
+
+The manager can click Use Suggestion, which fills the form automatically, but the manager still has to review and save it.
+
+Employee Score
+
+Previously, the employee had a task-performance score.
+
+Now:
+
+Employee Score = Task Score − Mistake Penalty
+
+Severity	Penalty
+Low	1
+Medium	3
+High	6
+Critical	10
+
+For a repeat mistake, the penalty is multiplied by 2.

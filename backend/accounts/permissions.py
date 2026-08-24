@@ -32,9 +32,14 @@ ROLE_CAPABILITIES = {
     Role.ACCOUNTS: {
         "leads.view_won", "tasks.view_own", "notifications.view",
     },
-    Role.SUPPORT: {
-        "leads.view_department", "leads.edit_department", "tasks.view_own",
-        "notifications.view",
+    # IT Lead: manager-level over the IT/dev side — assigns tasks, sees the
+    # department, reviews requests; no sales-pipeline powers.
+    Role.IT_LEAD: {
+        "tasks.view_department", "tasks.assign", "dashboard.view",
+        "notifications.view", "hr.approve",
+    },
+    Role.DEVELOPER: {
+        "tasks.view_own", "notifications.view",
     },
     # Dedicated HR: full leave/attendance powers company-wide, and no access
     # to the sales pipeline at all (separation of duties).

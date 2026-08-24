@@ -35,7 +35,8 @@ export const fmtEffort = (min) => {
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']]
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'Customer Support'], ['hr', 'Human Resources'], ['management', 'Management'],
+  ['support', 'IT Team'], ['development', 'Developer Team'],
+  ['hr', 'Human Resources'], ['management', 'Management'],
 ]
 const FREQUENCIES = [['one_time', 'One time'], ['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']]
 const RANGES = [

@@ -39,7 +39,7 @@ Reply with ONLY a JSON object, no prose, using exactly this shape:
  "priority": "low|normal|high|urgent",
  "department": "sales|purchase|accounts|support",
  "summary": "<one line summary>"}
-Rules: parts requests/price asks => intent purchase, department sales. Complaints/warranty/delivery issues => support. Payment/invoice queries => accounts. Promotions/irrelevant => spam. "urgent"/"immediately"/"breakdown" => priority high or urgent."""
+Rules: parts requests/price asks => intent purchase, department sales. Complaints/warranty/delivery/product issues => intent support, department sales (there is no customer-support team; the sales team handles product support). Technical/system/software/website issues => department support (the IT team). Payment/invoice queries => accounts. Promotions/irrelevant => spam. "urgent"/"immediately"/"breakdown" => priority high or urgent."""
 
 
 def _claude_enabled() -> bool:

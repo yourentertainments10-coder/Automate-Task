@@ -20,8 +20,9 @@ from accounts.models import Role, User
 REAL_TEAM = [
     ("Amit Kumar", "amit.singh@cartrends.in", "amit", "Amit", "Kumar", Role.SALES_EXECUTIVE, "sales"),
     ("Anuj IT Intern", "developer.team@cartrends.in", "anuj", "Anuj", "IT Intern", Role.ADMIN, "management"),
-    ("Anurag", "accounts@cartrends.co.in", "anurag", "Anurag", "", Role.ACCOUNTS, "accounts"),
-    ("ANURAG", "finance@cartrends.net", "anurag.finance", "Anurag", "Finance", Role.ACCOUNTS, "accounts"),
+    # One person, two mailboxes (accounts@ + finance@) — finance@ is his
+    # unique address so email-login works; accounts@ stays Kesar's.
+    ("Anurag", "finance@cartrends.net", "anurag", "Anurag", "", Role.ACCOUNTS, "accounts"),
     ("Arun Sharma", "arun.sharma@cartrends.in", "arun", "Arun", "Sharma", Role.SALES_EXECUTIVE, "sales"),
     ("Bhagwan Ji", "Bhagwanshaysharma449@gmail.com", "bhagwan", "Bhagwan", "Ji", Role.SALES_EXECUTIVE, "sales"),
     ("Bhawna Singh", "bhawna.singh@cartrends.in", "bhawna", "Bhawna", "Singh", Role.SALES_EXECUTIVE, "sales"),
@@ -52,7 +53,7 @@ REAL_TEAM = [
     ("Thakur Dass", "Bijwasan@cartrends.net", "thakur", "Thakur", "Dass", Role.SALES_EXECUTIVE, "sales"),
     ("Ujit", "ujit.kumar@cartrends.in", "ujit", "Ujit", "", Role.SALES_EXECUTIVE, "sales"),
     ("Ujjawal", "ujjwal.jain@cartrends.in", "ujjawal", "Ujjawal", "", Role.SALES_EXECUTIVE, "sales"),
-    ("Vinit", "itsupport@cartrends.net", "vinit", "Vinit", "", Role.SUPPORT, "support"),
+    ("Vinit", "itsupport@cartrends.net", "vinit", "Vinit", "", Role.IT_LEAD, "support"),
 ]
 
 

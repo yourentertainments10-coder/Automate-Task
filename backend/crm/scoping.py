@@ -45,7 +45,8 @@ def can_assign(user) -> bool:
 # ---------------------------------------------------------------------------
 from accounts.models import Role
 
-ROLE_LEVEL = {Role.ADMIN: 3, Role.SALES_MANAGER: 2, Role.HR_MANAGER: 2}
+ROLE_LEVEL = {Role.ADMIN: 3, Role.SALES_MANAGER: 2, Role.HR_MANAGER: 2,
+              Role.IT_LEAD: 2}
 
 
 def assignment_level(user) -> int:

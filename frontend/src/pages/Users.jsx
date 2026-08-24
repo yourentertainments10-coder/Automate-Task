@@ -20,16 +20,18 @@ const ROLES = [
   ['admin', 'Admin'],
   ['hr_manager', 'HR Manager'],
   ['sales_manager', 'Sales Manager'],
-  ['sales_executive', 'Sales Executive'],
+  ['sales_executive', 'Sales'],
   ['purchase', 'Purchase Team'],
   ['accounts', 'Accounts'],
-  ['support', 'Customer Support'],
+  ['it_lead', 'IT Lead'],
+  ['developer', 'Developer'],
 ]
 const DEPARTMENTS = [
   ['sales', 'Sales'],
   ['purchase', 'Purchase'],
   ['accounts', 'Accounts'],
-  ['support', 'Customer Support'],
+  ['support', 'IT Team'],
+  ['development', 'Developer Team'],
   ['hr', 'Human Resources'],
   ['management', 'Management'],
 ]
