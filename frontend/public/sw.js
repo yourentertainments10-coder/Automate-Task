@@ -4,16 +4,22 @@
  * instantly (and shows a proper offline page instead of a browser error),
  * but it NEVER caches API responses — business data must always be live.
  */
-const CACHE = 'cartrends-shell-v2';
+// The placeholder below is stamped by stamp-sw.mjs on every `npm run build`,
+// so each deploy ships a byte-different sw.js -> installed apps detect the
+// update and show the in-app "Update" button.
+const VERSION = '__BUILD_VERSION__';
+const CACHE = 'cartrends-shell-' + VERSION;
 const SHELL = ['/', '/index.html', '/manifest.webmanifest',
                '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE)
-      .then((c) => c.addAll(SHELL).catch(() => {}))
-      .then(() => self.skipWaiting())
-  );
+  // NO skipWaiting here: the new version waits until the user taps Update
+  // (or closes the app) -- never yank the rug mid-use.
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL).catch(() => {})));
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {

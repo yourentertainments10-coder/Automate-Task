@@ -106,6 +106,37 @@ function Shell({ children }) {
 
       <main className="content">{kids}</main>
       {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
+      <UpdateToast />
+    </div>
+  )
+}
+
+/* New deploy detected -> one-tap update. The waiting service worker is told
+   to take over; controllerchange (main.jsx) reloads onto the new version. */
+function UpdateToast() {
+  const [waiting, setWaiting] = useState(() => window.__swWaiting || null)
+  useEffect(() => {
+    const onUpdate = (e) => setWaiting(e.detail)
+    window.addEventListener('sw-update-available', onUpdate)
+    return () => window.removeEventListener('sw-update-available', onUpdate)
+  }, [])
+  if (!waiting) return null
+  return (
+    <div style={{
+      position: 'fixed', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+      zIndex: 90, display: 'flex', gap: 10, alignItems: 'center',
+      background: '#14201c', color: '#fff', padding: '10px 14px',
+      borderRadius: 12, boxShadow: '0 8px 30px rgba(20,32,28,.35)', maxWidth: '92vw',
+    }}>
+      <span style={{ fontSize: 13 }}>🔄 App ka naya version aa gaya hai</span>
+      <button className="btn btn-sm btn-primary"
+        onClick={() => waiting.postMessage({ type: 'SKIP_WAITING' })}>
+        Update
+      </button>
+      <button className="btn btn-sm" style={{ color: '#fff', background: 'transparent', border: '1px solid #3a4a44' }}
+        onClick={() => setWaiting(null)} title="Agli baar app kholne pe khud update ho jayega">
+        Later
+      </button>
     </div>
   )
 }
