@@ -36,6 +36,7 @@ const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['ur
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
   ['support', 'IT Team'], ['development', 'Developer Team'],
+  ['warehouse', 'Warehouse'],
   ['hr', 'Human Resources'], ['management', 'Management'],
 ]
 const FREQUENCIES = [['one_time', 'One time'], ['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']]

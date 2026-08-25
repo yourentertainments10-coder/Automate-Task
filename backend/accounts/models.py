@@ -18,6 +18,8 @@ class Role(models.TextChoices):
     ACCOUNTS = "accounts", "Accounts"
     IT_LEAD = "it_lead", "IT Lead"
     DEVELOPER = "developer", "Developer"
+    WAREHOUSE_MANAGER = "warehouse_manager", "Warehouse Manager"
+    WAREHOUSE = "warehouse", "Warehouse Team"
     HR_MANAGER = "hr_manager", "HR Manager"
 
 
@@ -27,6 +29,7 @@ class Department(models.TextChoices):
     ACCOUNTS = "accounts", "Accounts"
     SUPPORT = "support", "IT Team"
     DEVELOPMENT = "development", "Developer Team"
+    WAREHOUSE = "warehouse", "Warehouse"
     HR = "hr", "Human Resources"
     MANAGEMENT = "management", "Management"
 
@@ -39,6 +42,8 @@ ROLE_DEFAULT_DEPARTMENT = {
     Role.ACCOUNTS: Department.ACCOUNTS,
     Role.IT_LEAD: Department.SUPPORT,
     Role.DEVELOPER: Department.DEVELOPMENT,
+    Role.WAREHOUSE_MANAGER: Department.WAREHOUSE,
+    Role.WAREHOUSE: Department.WAREHOUSE,
     Role.HR_MANAGER: Department.HR,
 }
 

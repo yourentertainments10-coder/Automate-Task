@@ -17,10 +17,12 @@ const ROLES = [
   ['sales_manager', 'Sales Manager'], ['sales_executive', 'Sales'],
   ['purchase', 'Purchase Team'], ['accounts', 'Accounts'],
   ['it_lead', 'IT Lead'], ['developer', 'Developer'],
+  ['warehouse_manager', 'Warehouse Manager'], ['warehouse', 'Warehouse Team'],
 ]
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
   ['support', 'IT Team'], ['development', 'Developer Team'],
+  ['warehouse', 'Warehouse'],
   ['hr', 'Human Resources'], ['management', 'Management'],
 ]
 

@@ -24,6 +24,8 @@ const ROLES = [
   ['purchase', 'Purchase Team'],
   ['accounts', 'Accounts'],
   ['it_lead', 'IT Lead'],
+  ['warehouse_manager', 'Warehouse Manager'],
+  ['warehouse', 'Warehouse Team'],
   ['developer', 'Developer'],
 ]
 const DEPARTMENTS = [
@@ -32,6 +34,7 @@ const DEPARTMENTS = [
   ['accounts', 'Accounts'],
   ['support', 'IT Team'],
   ['development', 'Developer Team'],
+  ['warehouse', 'Warehouse'],
   ['hr', 'Human Resources'],
   ['management', 'Management'],
 ]
@@ -138,7 +141,8 @@ function ManageTeam() {
   useEffect(() => { load() }, [])
 
   const managers = useMemo(() =>
-    rows.filter(u => ['admin', 'sales_manager'].includes(u.role) && u.is_active), [rows])
+    rows.filter(u => ['admin', 'sales_manager', 'hr_manager', 'it_lead',
+                      'warehouse_manager'].includes(u.role) && u.is_active), [rows])
 
   const shown = useMemo(() => rows.filter(u => {
     if (fRole && u.role !== fRole) return false

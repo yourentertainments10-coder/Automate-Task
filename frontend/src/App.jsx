@@ -68,7 +68,8 @@ function Shell({ children }) {
 
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">CT</span>
+          <img src="/logo.png" alt="CarTrends"
+            style={{ height: 30, width: 'auto', background: '#fff', borderRadius: 6, padding: '3px 5px' }} />
           <div>Automation Task<small>CarTrends</small></div>
         </div>
         <nav>

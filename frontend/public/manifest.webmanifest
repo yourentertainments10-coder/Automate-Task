@@ -1,6 +1,6 @@
 {
-  "name": "CarTrends CRM",
-  "short_name": "CarTrends",
+  "name": "Automation Task",
+  "short_name": "Automation Task",
   "description": "Leads, tasks, attendance and payroll for the CarTrends team.",
   "start_url": "/",
   "scope": "/",

@@ -38,6 +38,14 @@ ROLE_CAPABILITIES = {
         "tasks.view_department", "tasks.assign", "dashboard.view",
         "notifications.view", "hr.approve",
     },
+    # Warehouse: same shape — manager runs the floor, team works own tasks.
+    Role.WAREHOUSE_MANAGER: {
+        "tasks.view_department", "tasks.assign", "dashboard.view",
+        "notifications.view", "hr.approve",
+    },
+    Role.WAREHOUSE: {
+        "tasks.view_own", "notifications.view",
+    },
     Role.DEVELOPER: {
         "tasks.view_own", "notifications.view",
     },

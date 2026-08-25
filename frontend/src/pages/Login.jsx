@@ -30,9 +30,9 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <div className="brand big">
-          <span className="brand-mark">CT</span>
-          <div>CarTrends <small>Internal CRM</small></div>
+        <div className="brand big" style={{ flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <img src="/logo.png" alt="CarTrends" style={{ height: 64, width: 'auto' }} />
+          <div style={{ textAlign: 'center' }}>Automation Task <small>by CarTrends</small></div>
         </div>
         <label>Username or email</label>
         <input value={username} onChange={e => setUsername(e.target.value)} autoFocus autoComplete="username" />
