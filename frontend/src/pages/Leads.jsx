@@ -17,7 +17,7 @@ const SOURCES = [
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']]
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'IT Team'], ['management', 'Management'],
+  ['support', 'IT Team'], ['warehouse', 'Warehouse'], ['management', 'Management'],
 ]
 
 export const fmtINR = (n) => {

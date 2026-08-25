@@ -3,7 +3,7 @@ import { api, errorText } from '../api'
 
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'IT Team'], ['management', 'Management'],
+  ['support', 'IT Team'], ['warehouse', 'Warehouse'], ['management', 'Management'],
 ]
 
 export default function Settings() {
