@@ -493,16 +493,21 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
   )
 }
 
-/* Dropdown with checkboxes — used for Assign to and Loop (multi-select) */
+/* Dropdown with checkboxes + name search — used for Assign to and Loop */
 function MultiSelect({ options, selected, onChange, placeholder }) {
   const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
   const picked = options.filter(o => selected.includes(o.id))
   const label = picked.length === 0 ? (placeholder || '— select —')
     : picked.length <= 2 ? picked.map(o => o.name).join(', ')
     : `${picked.length} selected`
+  const shown = q.trim()
+    ? options.filter(o => o.name.toLowerCase().includes(q.trim().toLowerCase()))
+    : options
+  const close = () => { setOpen(false); setQ('') }
   return (
     <div style={{ position: 'relative' }}>
-      <button type="button" onClick={() => setOpen(o => !o)}
+      <button type="button" onClick={() => open ? close() : setOpen(true)}
         style={{
           width: '100%', textAlign: 'left', border: '1px solid var(--line)',
           borderRadius: 9, padding: '9px 11px', background: 'var(--surface)',
@@ -512,24 +517,34 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
       </button>
       {open && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9 }} onClick={close} />
           <div style={{
             position: 'absolute', zIndex: 10, top: '104%', left: 0, right: 0,
-            maxHeight: 180, overflowY: 'auto', background: 'var(--surface)',
-            border: '1px solid var(--line)', borderRadius: 9,
-            boxShadow: '0 8px 24px rgba(20,32,28,.18)', padding: 6,
+            background: 'var(--surface)', border: '1px solid var(--line)',
+            borderRadius: 9, boxShadow: '0 8px 24px rgba(20,32,28,.18)', padding: 6,
           }}>
-            {options.map(o => (
-              <label key={o.id} style={{
-                display: 'flex', gap: 8, alignItems: 'center', padding: '5px 8px',
-                fontWeight: 'normal', cursor: 'pointer', borderRadius: 6, margin: 0,
-              }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={selected.includes(o.id)}
-                  onChange={() => onChange(selected.includes(o.id)
-                    ? selected.filter(x => x !== o.id) : [...selected, o.id])} />
-                {o.name}
-              </label>
-            ))}
+            <input type="search" placeholder="🔍 Search name…" value={q} autoFocus
+              onChange={e => setQ(e.target.value)}
+              style={{
+                width: '100%', border: '1px solid var(--line)', borderRadius: 7,
+                padding: '6px 9px', marginBottom: 6, fontSize: 13,
+              }} />
+            <div style={{ maxHeight: 180, overflowY: 'auto' }}>
+              {shown.length === 0 && (
+                <div className="muted small" style={{ padding: '6px 8px' }}>No one matches “{q}”.</div>
+              )}
+              {shown.map(o => (
+                <label key={o.id} style={{
+                  display: 'flex', gap: 8, alignItems: 'center', padding: '5px 8px',
+                  fontWeight: 'normal', cursor: 'pointer', borderRadius: 6, margin: 0,
+                }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={selected.includes(o.id)}
+                    onChange={() => onChange(selected.includes(o.id)
+                      ? selected.filter(x => x !== o.id) : [...selected, o.id])} />
+                  {o.name}
+                </label>
+              ))}
+            </div>
           </div>
         </>
       )}

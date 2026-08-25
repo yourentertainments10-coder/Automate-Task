@@ -265,6 +265,39 @@ correction → Dept Head owns repeats → Founder sees only serious escalations.
 - ~~Blocked on Sir~~ resolved 20 Aug: dept heads = the existing managers,
   category list received (29 seeded), SLA Critical = 4h (configurable).
 
+## Phase N — Notifications & WhatsApp CRM (25 Aug list) — assessment done
+
+- [ ] **N1 · Overdue WhatsApp reminders every 2h** (~half day code): change
+      the reminder dedupe from one-ping-per-due-date to re-ping every 2h
+      while overdue; WhatsApp channel is already coded — BLOCKED on Meta
+      credentials + an approved message template (business-initiated
+      messages outside the 24h window require templates).
+- [ ] **N2 · Daily pending-tasks email per employee** (~half day): same
+      digest pattern as the mistake digests; Gmail sender already coded —
+      BLOCKED on Google OAuth credentials.
+- [x] **N3 · Instant assignment alerts** — already live (in-app now;
+      WhatsApp/email join automatically once credentials are set).
+- [x] **N4 · WhatsApp → auto-lead capture** — already built (intake webhook
+      → AI/rules classify → lead → auto-assign). Needs Meta webhook pointed
+      at the Render URL + credentials.
+- [ ] **N5 · Multi-number** — ⚠ constrained by Meta, needs a DECISION:
+      official Cloud API numbers can't simultaneously run normal WhatsApp
+      on a phone. Options: (a) ONE central business number, whole team
+      replies through the CRM (recommended, what big companies do);
+      (b) several numbers all registered under the WABA (each loses
+      phone-app WhatsApp); (c) unofficial bridges for personal numbers —
+      ban risk, not recommended for the business number.
+- [ ] **N6 · Data migration from the old Apps Script CRM** (~1-2 days):
+      already scoped in §1.2 — needs admin access to the backing Google
+      Sheet; imports customers -> leads, call log -> lead timeline (that
+      also delivers "previous chat/call history visible per contact").
+- [ ] **N7 · Automatic CALL capture** — not possible from a browser app;
+      needs cloud telephony (Exotel/Knowlarity etc., paid) later. Manual
+      call notes on a lead already exist.
+- [x] **N8 · Lead ownership tracking** — already live: reassignment logged
+      in the lead timeline, owner on dashboard, overdue follow-ups flagged
+      + reminded.
+
 ## Decisions to confirm with Sir before/while building
 1. **Modification-request approver routing** — the reconciled rule in B2
    (assignee→creator approves; creator→admin approves; admin sees all).
