@@ -46,6 +46,10 @@ ROLE_CAPABILITIES = {
     Role.WAREHOUSE: {
         "tasks.view_own", "notifications.view",
     },
+    # Riders: delivery runs assigned as tasks; own tasks + notifications.
+    Role.RIDER: {
+        "tasks.view_own", "notifications.view",
+    },
     Role.DEVELOPER: {
         "tasks.view_own", "notifications.view",
     },

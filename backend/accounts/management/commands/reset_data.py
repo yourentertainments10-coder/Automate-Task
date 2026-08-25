@@ -40,7 +40,7 @@ REAL_TEAM = [
     ("Prateek Sir", "foundersteam@cartrends.net", "prateek", "Prateek", "", Role.ADMIN, "management"),
     ("Rahul Bhandari", "rahul.bhandari@cartrends.in", "rahul.bhandari", "Rahul", "Bhandari", Role.WAREHOUSE, "warehouse"),
     ("Rahul Sinha", "Bijwasan@cartrends.net", "rahul.sinha", "Rahul", "Sinha", Role.WAREHOUSE_MANAGER, "warehouse"),
-    ("Rahul Thakur", "rahulthakur3928@gmail.com", "rahul.thakur", "Rahul", "Thakur", Role.WAREHOUSE, "warehouse"),
+    ("Rahul Thakur", "rahulthakur3928@gmail.com", "rahul.thakur", "Rahul", "Thakur", Role.RIDER, "warehouse"),
     ("Ramprasad Pandey", "ram.prasad@cartrends.in", "ramprasad", "Ramprasad", "Pandey", Role.SALES_EXECUTIVE, "sales"),
     ("Ronak", "ronak.sales@cartrends.in", "ronak", "Ronak", "", Role.SALES_EXECUTIVE, "sales"),
     ("Ronit Netwal", "ronit.netwal@cartrends.in", "ronit", "Ronit", "Netwal", Role.SALES_EXECUTIVE, "sales"),
@@ -59,7 +59,7 @@ REAL_TEAM = [
     ("Narendra", "", "narendra", "Narendra", "", Role.WAREHOUSE, "warehouse"),
     ("Anil", "", "anil", "Anil", "", Role.WAREHOUSE, "warehouse"),
     ("Rahul Tyagi", "", "rahul.tyagi", "Rahul", "Tyagi", Role.WAREHOUSE, "warehouse"),
-    ("Kuldeep (Riders)", "", "kuldeep", "Kuldeep", "", Role.WAREHOUSE, "warehouse"),
+    ("Kuldeep", "", "kuldeep", "Kuldeep", "", Role.RIDER, "warehouse"),
 ]
 
 

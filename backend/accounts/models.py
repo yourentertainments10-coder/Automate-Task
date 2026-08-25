@@ -20,6 +20,7 @@ class Role(models.TextChoices):
     DEVELOPER = "developer", "Developer"
     WAREHOUSE_MANAGER = "warehouse_manager", "Warehouse Manager"
     WAREHOUSE = "warehouse", "Warehouse Team"
+    RIDER = "rider", "Rider"
     HR_MANAGER = "hr_manager", "HR Manager"
 
 
@@ -44,6 +45,7 @@ ROLE_DEFAULT_DEPARTMENT = {
     Role.DEVELOPER: Department.DEVELOPMENT,
     Role.WAREHOUSE_MANAGER: Department.WAREHOUSE,
     Role.WAREHOUSE: Department.WAREHOUSE,
+    Role.RIDER: Department.WAREHOUSE,
     Role.HR_MANAGER: Department.HR,
 }
 

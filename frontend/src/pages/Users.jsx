@@ -26,6 +26,7 @@ const ROLES = [
   ['it_lead', 'IT Lead'],
   ['warehouse_manager', 'Warehouse Manager'],
   ['warehouse', 'Warehouse Team'],
+  ['rider', 'Rider'],
   ['developer', 'Developer'],
 ]
 const DEPARTMENTS = [

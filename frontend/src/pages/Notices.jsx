@@ -18,6 +18,7 @@ const ROLES = [
   ['purchase', 'Purchase Team'], ['accounts', 'Accounts'],
   ['it_lead', 'IT Lead'], ['developer', 'Developer'],
   ['warehouse_manager', 'Warehouse Manager'], ['warehouse', 'Warehouse Team'],
+  ['rider', 'Rider'],
 ]
 const DEPARTMENTS = [
   ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
