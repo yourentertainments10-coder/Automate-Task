@@ -52,12 +52,21 @@ def _post(payload: dict) -> dict:
         return {"channel": "whatsapp", "status": "error", "detail": str(exc)[:200]}
 
 
+def _normalize(phone: str) -> str:
+    """Meta wants E.164 without '+': '919876543210'. People type 10-digit
+    Indian numbers — add the 91 for them."""
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if len(digits) == 10:
+        return "91" + digits
+    return digits
+
+
 def send_text(to_phone: str, body: str) -> dict:
     if not to_phone:
         return {"channel": "whatsapp", "status": "skipped", "detail": "user has no whatsapp number"}
     return _post({
         "messaging_product": "whatsapp",
-        "to": to_phone,
+        "to": _normalize(to_phone),
         "type": "text",
         "text": {"preview_url": False, "body": body[:4000]},
     })
