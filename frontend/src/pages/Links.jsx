@@ -97,7 +97,12 @@ export default function Links() {
         </div>
       ))}
       {showAdd && (
-        <LinkModal collections={collections} groups={groups}
+        <LinkModal collections={collections} groups={groups} canManage={canManage}
+          onQuickCreate={async (name) => {
+            const c = await api('/api/link-collections/', { method: 'POST', body: { name } })
+            load()
+            return c
+          }}
           onClose={() => setShowAdd(false)}
           onSaved={() => { setShowAdd(false); load() }} />
       )}
@@ -105,12 +110,28 @@ export default function Links() {
   )
 }
 
-function LinkModal({ collections, groups, onClose, onSaved }) {
+function LinkModal({ collections, groups, canManage, onQuickCreate, onClose, onSaved }) {
   const [f, setF] = useState({
     collection: collections[0]?.id || '', title: '', url: '', description: '', group: '',
   })
+  const [newColl, setNewColl] = useState('')
   const [err, setErr] = useState('')
   const set = k => e => setF(p => ({ ...p, [k]: e.target.value }))
+
+  // collections can arrive/refresh while the modal is open — adopt the first
+  useEffect(() => {
+    if (!f.collection && collections[0]) setF(p => ({ ...p, collection: collections[0].id }))
+  }, [collections])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const quickCreate = async () => {
+    if (!newColl.trim()) return
+    setErr('')
+    try {
+      const c = await onQuickCreate(newColl.trim())
+      setF(p => ({ ...p, collection: c.id }))
+      setNewColl('')
+    } catch (ex) { setErr(errorText(ex.data) || ex.message) }
+  }
 
   const submit = async (e) => {
     e.preventDefault()
@@ -130,10 +151,24 @@ function LinkModal({ collections, groups, onClose, onSaved }) {
           <div className="wide"><label>URL *</label><input value={f.url} onChange={set('url')} placeholder="https://…" /></div>
           <div className="wide"><label>Description</label><input value={f.description} onChange={set('description')} /></div>
           <div>
-            <label>Collection *</label>
-            <select value={f.collection} onChange={set('collection')}>
-              {collections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <label>Collection * (the folder this link lives in)</label>
+            {collections.length > 0 ? (
+              <select value={f.collection} onChange={set('collection')}>
+                {collections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            ) : canManage ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input placeholder="e.g. Important Tools" value={newColl} autoFocus
+                  onChange={e => setNewColl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); quickCreate() } }} />
+                <button type="button" className="btn btn-sm btn-primary"
+                  disabled={!newColl.trim()} onClick={quickCreate}>Create</button>
+              </div>
+            ) : (
+              <p className="muted small" style={{ margin: 0 }}>
+                No collections yet — ask a manager/admin to create one first.
+              </p>
+            )}
           </div>
           <div>
             <label>Visible to</label>

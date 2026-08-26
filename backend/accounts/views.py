@@ -1,3 +1,4 @@
+from django.db.models.functions import Lower
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -34,7 +35,7 @@ def team_directory(request):
         users = users.filter(reporting_manager=viewer)  # direct reports only
     else:
         users = users.filter(department=viewer.department)
-    users = users.order_by("first_name", "username")
+    users = users.order_by(Lower("first_name"), Lower("username"))
     return Response([
         {
             "id": u.id,
@@ -78,7 +79,7 @@ def logout(request):
 class UserViewSet(viewsets.ModelViewSet):
     """User management for roles with `users.manage` (Admin, HR Manager).
     Deactivation instead of deletion keeps lead/task history intact."""
-    queryset = User.objects.all().order_by("username")
+    queryset = User.objects.all().order_by(Lower("first_name"), Lower("username"))
     permission_classes = [HasCapability.of("users.manage")]
 
     def _guard_role(self, requested_role, target=None):
