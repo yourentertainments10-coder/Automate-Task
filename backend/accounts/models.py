@@ -14,9 +14,12 @@ class Role(models.TextChoices):
     # There is no customer-support post: product/other support IS the Sales
     # post; tech support is the IT Lead post. Developer team is separate.
     SALES_EXECUTIVE = "sales_executive", "Sales"
+    PURCHASE_MANAGER = "purchase_manager", "Purchase Manager"
     PURCHASE = "purchase", "Purchase Team"
+    ACCOUNTS_MANAGER = "accounts_manager", "Accounts Manager"
     ACCOUNTS = "accounts", "Accounts"
     IT_LEAD = "it_lead", "IT Lead"
+    DEVELOPER_MANAGER = "developer_manager", "Developer Manager"
     DEVELOPER = "developer", "Developer"
     WAREHOUSE_MANAGER = "warehouse_manager", "Warehouse Manager"
     WAREHOUSE = "warehouse", "Warehouse Team"
@@ -39,9 +42,12 @@ ROLE_DEFAULT_DEPARTMENT = {
     Role.ADMIN: Department.MANAGEMENT,
     Role.SALES_MANAGER: Department.SALES,
     Role.SALES_EXECUTIVE: Department.SALES,
+    Role.PURCHASE_MANAGER: Department.PURCHASE,
     Role.PURCHASE: Department.PURCHASE,
+    Role.ACCOUNTS_MANAGER: Department.ACCOUNTS,
     Role.ACCOUNTS: Department.ACCOUNTS,
     Role.IT_LEAD: Department.SUPPORT,
+    Role.DEVELOPER_MANAGER: Department.DEVELOPMENT,
     Role.DEVELOPER: Department.DEVELOPMENT,
     Role.WAREHOUSE_MANAGER: Department.WAREHOUSE,
     Role.WAREHOUSE: Department.WAREHOUSE,

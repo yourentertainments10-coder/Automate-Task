@@ -20,6 +20,9 @@ const ROLES = [
   ['admin', 'Admin'],
   ['hr_manager', 'HR Manager'],
   ['sales_manager', 'Sales Manager'],
+  ['purchase_manager', 'Purchase Manager'],
+  ['accounts_manager', 'Accounts Manager'],
+  ['developer_manager', 'Developer Manager'],
   ['sales_executive', 'Sales'],
   ['purchase', 'Purchase Team'],
   ['accounts', 'Accounts'],
@@ -143,7 +146,8 @@ function ManageTeam() {
 
   const managers = useMemo(() =>
     rows.filter(u => ['admin', 'sales_manager', 'hr_manager', 'it_lead',
-                      'warehouse_manager'].includes(u.role) && u.is_active), [rows])
+                      'warehouse_manager', 'purchase_manager', 'accounts_manager',
+                      'developer_manager'].includes(u.role) && u.is_active), [rows])
 
   const shown = useMemo(() => rows.filter(u => {
     if (fRole && u.role !== fRole) return false

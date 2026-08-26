@@ -15,6 +15,8 @@ const toLocalInput = (iso) => {
 const ROLES = [
   ['admin', 'Admin'], ['hr_manager', 'HR Manager'],
   ['sales_manager', 'Sales Manager'], ['sales_executive', 'Sales'],
+  ['purchase_manager', 'Purchase Manager'], ['accounts_manager', 'Accounts Manager'],
+  ['developer_manager', 'Developer Manager'],
   ['purchase', 'Purchase Team'], ['accounts', 'Accounts'],
   ['it_lead', 'IT Lead'], ['developer', 'Developer'],
   ['warehouse_manager', 'Warehouse Manager'], ['warehouse', 'Warehouse Team'],

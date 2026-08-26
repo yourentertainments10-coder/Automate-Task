@@ -26,11 +26,23 @@ ROLE_CAPABILITIES = {
         "leads.view_own", "leads.edit_own", "tasks.view_own",
         "quotations.manage", "notifications.view",
     },
+    Role.PURCHASE_MANAGER: {
+        "leads.view_department", "tasks.view_department", "tasks.assign",
+        "dashboard.view", "notifications.view", "hr.approve",
+    },
     Role.PURCHASE: {
         "leads.view_department", "tasks.view_own", "notifications.view",
     },
+    Role.ACCOUNTS_MANAGER: {
+        "leads.view_won", "tasks.view_department", "tasks.assign",
+        "dashboard.view", "notifications.view", "hr.approve",
+    },
     Role.ACCOUNTS: {
         "leads.view_won", "tasks.view_own", "notifications.view",
+    },
+    Role.DEVELOPER_MANAGER: {
+        "tasks.view_department", "tasks.assign", "dashboard.view",
+        "notifications.view", "hr.approve",
     },
     # IT Lead: manager-level over the IT/dev side — assigns tasks, sees the
     # department, reviews requests; no sales-pipeline powers.
