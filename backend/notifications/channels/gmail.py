@@ -83,6 +83,17 @@ def send_email(to_email: str, subject: str, body: str) -> dict:
             timeout=15,
         )
         if res.status_code < 300:
+            # Self-addressed mail (a user registered with the SENDER mailbox)
+            # lands pre-read — flip it back to unread so it isn't missed.
+            if to_email.strip().lower() == _cfg()["sender"].lower():
+                msg_id = res.json().get("id")
+                if msg_id:
+                    requests.post(
+                        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}/modify",
+                        json={"addLabelIds": ["UNREAD", "INBOX"]},
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=15,
+                    )
             return {"channel": "gmail", "status": "sent", "detail": ""}
         log.warning("Gmail send failed %s: %s", res.status_code, res.text[:300])
         return {"channel": "gmail", "status": "error", "detail": f"HTTP {res.status_code}"}

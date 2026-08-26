@@ -10,7 +10,7 @@ from .models import Notification
 
 def notify(user, type_: str, title: str, body: str = "", link: str = "") -> Notification:
     results = []
-    results.append(gmail.send_email(user.email, f"[CarTrends CRM] {title}", body or title))
+    results.append(gmail.send_email(user.email, f"[Automation Task] {title}", body or title))
     results.append(whatsapp.send_text(user.whatsapp_phone, f"{title}\n{body}".strip()))
     return Notification.objects.create(
         user=user, type=type_, title=title, body=body, link=link, channels=results,
