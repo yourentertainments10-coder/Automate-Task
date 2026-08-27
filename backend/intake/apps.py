@@ -14,9 +14,10 @@ class IntakeConfig(AppConfig):
         # configured, so local dev without credentials runs zero threads.
         if os.environ.get("GMAIL_ENABLED", "false").lower() != "true":
             return
-        # Sending and polling are separate concerns: a mailbox shared with
-        # another system should usually be send-only here.
-        if os.environ.get("GMAIL_POLL_ENABLED", "true").lower() != "true":
+        # Sending and polling are separate concerns. Polling (emails -> leads)
+        # is OPT-IN: it once ingested the whole shared inbox as junk leads,
+        # so it stays off unless explicitly switched on.
+        if os.environ.get("GMAIL_POLL_ENABLED", "false").lower() != "true":
             return
         serving = any(cmd in sys.argv for cmd in ("runserver", "gunicorn")) or "gunicorn" in sys.argv[0]
         if not serving:
