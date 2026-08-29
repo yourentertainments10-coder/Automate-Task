@@ -143,6 +143,7 @@ function DepartmentManager({ onError }) {
 
 /* F1: managed task categories — admin CRUD with live task counts */
 function CategoryManager({ onError }) {
+  const DEPARTMENTS = useDepartments()
   const [cats, setCats] = useState(null)
   const [f, setF] = useState({ name: '', department: '' })
 
