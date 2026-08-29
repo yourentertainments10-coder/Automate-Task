@@ -82,7 +82,7 @@ class GroupTests(Base):
     def test_cannot_create_task_in_foreign_group(self):
         g = Group.objects.create(name="G", owner=self.manager)
         self.as_(self.rahul)
-        res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.rahul.id,
+        res = self.client.post("/api/tasks/", {"due_at": (timezone.now() + timedelta(days=1)).isoformat(), "title": "X", "assigned_to": self.rahul.id,
                                                "effort_minutes": 30, "group": g.id})
         self.assertEqual(res.status_code, 403)
 

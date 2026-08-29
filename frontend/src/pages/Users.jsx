@@ -3,6 +3,7 @@ import { api, errorText } from '../api'
 import { useAuth } from '../auth'
 import PersonProfile from './PersonProfile'
 import { WorkloadPanel } from './TaskExtras'
+import { useDepartments } from '../useDepartments'
 
 /* C2: fetch-on-expand workload for one team member */
 function WorkloadCell({ userId }) {
@@ -32,16 +33,6 @@ const ROLES = [
   ['warehouse', 'Warehouse Team'],
   ['rider', 'Rider'],
   ['developer', 'Developer'],
-]
-const DEPARTMENTS = [
-  ['sales', 'Sales'],
-  ['purchase', 'Purchase'],
-  ['accounts', 'Accounts'],
-  ['support', 'IT Team'],
-  ['development', 'Developer Team'],
-  ['warehouse', 'Warehouse'],
-  ['hr', 'Human Resources'],
-  ['management', 'Management'],
 ]
 
 const EMPTY = {
@@ -199,7 +190,12 @@ function ManageTeam() {
         </select>
         <select value={fManager} onChange={e => setFManager(e.target.value)}>
           <option value="">Reporting manager…</option>
-          {managers.map(m => <option key={m.id} value={m.id}>{m.first_name || m.username}</option>)}
+          {managers.map(m => (
+            <option key={m.id} value={m.id}>
+              {`${m.first_name || ''} ${m.last_name || ''}`.trim() || m.username}
+              {` — ${m.role_display}`}
+            </option>
+          ))}
         </select>
         <span className="muted small">{shown.length}/{rows.length} members</span>
       </div>
@@ -269,6 +265,7 @@ function ManageTeam() {
 }
 
 function UserModal({ initial, managers, onClose, onSaved }) {
+  const DEPARTMENTS = useDepartments()
   const [f, setF] = useState(initial
     ? { ...EMPTY, ...initial, reporting_manager: initial.reporting_manager || '', password: '' }
     : EMPTY)
@@ -342,8 +339,15 @@ function UserModal({ initial, managers, onClose, onSaved }) {
             <select required={f.role !== 'admin'} value={f.reporting_manager}
               onChange={set('reporting_manager')}>
               <option value="">{f.role === 'admin' ? 'NA' : 'Select a manager…'}</option>
+              {/* full name + role: there are three Rahuls, a first name alone
+                  is not enough to pick the right manager */}
               {managers.filter(m => !initial || m.id !== initial.id)
-                .map(m => <option key={m.id} value={m.id}>{m.first_name || m.username}</option>)}
+                .map(m => (
+                  <option key={m.id} value={m.id}>
+                    {`${m.first_name || ''} ${m.last_name || ''}`.trim() || m.username}
+                    {` — ${m.role_display}`}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="wide">

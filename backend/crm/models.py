@@ -153,6 +153,13 @@ class TaskCategory(models.Model):
     department = models.CharField(max_length=20, choices=Department.choices,
                                   blank=True, default="")
     active = models.BooleanField(default=True)
+    # An employee cannot add a category outright -- they raise a request that
+    # a manager/admin approves. pending=True + active=False is that request;
+    # pending=False + active=False is a category that was removed.
+    pending = models.BooleanField(default=False)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                     on_delete=models.SET_NULL,
+                                     related_name="requested_categories")
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)

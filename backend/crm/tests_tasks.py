@@ -55,16 +55,16 @@ class TaskApiTests(TaskBase):
         # Task Engine v2 hierarchy: employee -> fellow employee is ALLOWED,
         # employee -> manager is not.
         self.as_(self.rahul)
-        res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.amit.id,
+        res = self.client.post("/api/tasks/", {"due_at": (timezone.now() + timedelta(days=1)).isoformat(), "title": "X", "assigned_to": self.amit.id,
                                                "effort_minutes": 30})
         self.assertEqual(res.status_code, 201)
-        res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.manager.id,
+        res = self.client.post("/api/tasks/", {"due_at": (timezone.now() + timedelta(days=1)).isoformat(), "title": "X", "assigned_to": self.manager.id,
                                                "effort_minutes": 30})
         self.assertEqual(res.status_code, 403)
 
     def test_exec_can_create_own_task(self):
         self.as_(self.rahul)
-        res = self.client.post("/api/tasks/", {"title": "Prepare catalogue", "assigned_to": self.rahul.id,
+        res = self.client.post("/api/tasks/", {"due_at": (timezone.now() + timedelta(days=1)).isoformat(), "title": "Prepare catalogue", "assigned_to": self.rahul.id,
                                                "effort_minutes": 60})
         self.assertEqual(res.status_code, 201)
         # No self-notification
@@ -73,7 +73,7 @@ class TaskApiTests(TaskBase):
     def test_cannot_link_invisible_lead(self):
         other_lead = Lead.objects.create(customer_name="P", department="purchase")
         self.as_(self.rahul)
-        res = self.client.post("/api/tasks/", {"title": "X", "assigned_to": self.rahul.id,
+        res = self.client.post("/api/tasks/", {"due_at": (timezone.now() + timedelta(days=1)).isoformat(), "title": "X", "assigned_to": self.rahul.id,
                                                "effort_minutes": 30, "lead": other_lead.id})
         self.assertEqual(res.status_code, 403)
 

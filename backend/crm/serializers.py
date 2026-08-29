@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from accounts.models import User
+from accounts.serializers import DepartmentField
 
 from .models import (
     AssignmentRule, Holiday, Lead, LeadDocument, LeadEvent, Quotation,
@@ -11,13 +12,19 @@ from .models import (
 
 class TaskCategorySerializer(serializers.ModelSerializer):
     department_display = serializers.CharField(source="get_department_display", read_only=True)
+    requested_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = TaskCategory
-        fields = ["id", "name", "department", "department_display", "active"]
+        fields = ["id", "name", "department", "department_display", "active",
+                  "pending", "requested_by_name"]
         # active is toggled via DELETE (deactivate), never set on create --
         # a form POST without the field must not save active=False
         read_only_fields = ["active"]
+
+    def get_requested_by_name(self, obj):
+        who = obj.requested_by
+        return (who.get_full_name() or who.username) if who else None
 
     def validate(self, attrs):
         name = attrs.get("name", "").strip()
@@ -116,6 +123,7 @@ class TaskSerializer(serializers.ModelSerializer):
     subscribed = serializers.SerializerMethodField()
 
     code = serializers.CharField(read_only=True)
+    department = DepartmentField(required=False, allow_blank=True)
     parent_code = serializers.CharField(source="parent.code", read_only=True, default=None)
     pending_change_requests = serializers.SerializerMethodField()
 
@@ -240,10 +248,10 @@ class TaskChangeRequestSerializer(serializers.ModelSerializer):
         """The approver decides on the strength of this sentence alone, so a
         two-word "pls change" is not enough to act on."""
         text = (value or "").strip()
-        if len(text) < 15:
+        if len(text) < 10 or len(text.split()) < 2:
             raise serializers.ValidationError(
-                "Explain why in at least a full sentence — the approver only "
-                "sees this and has to decide from it.")
+                "Say why in a few words — the approver decides from this line "
+                "(e.g. \"customer moved the deadline\").")
         return text
 
     def validate_changes(self, value):

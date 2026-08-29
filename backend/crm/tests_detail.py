@@ -1,5 +1,9 @@
 """Phase E: task detail (checklist, sub-tasks, comments, per-task feed) and
 the AI layer's deterministic fallback."""
+from datetime import timedelta
+
+from django.utils import timezone
+
 from .ai_tasks import draft_task, review_sentence
 from .models import Task, TaskChecklistItem
 from .tests_task_engine import Base
@@ -51,12 +55,14 @@ class SubtaskTests(Base):
                                      created_by=self.manager)
         self.as_(self.manager)
         res = self.client.post("/api/tasks/", {
+            "due_at": (timezone.now() + timedelta(days=1)).isoformat(),
             "title": "Child", "assigned_to": self.rahul.id,
             "effort_minutes": 15, "parent": parent.id}, format="json")
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.data["parent_code"], parent.code)
         # grandchild refused
         res = self.client.post("/api/tasks/", {
+            "due_at": (timezone.now() + timedelta(days=1)).isoformat(),
             "title": "Grandchild", "assigned_to": self.rahul.id,
             "effort_minutes": 15, "parent": res.data["id"]}, format="json")
         self.assertEqual(res.status_code, 400)

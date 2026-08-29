@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, errorText, tokens } from '../api'
 import { useAuth } from '../auth'
 import FormRenderer from './FormRenderer'
+import { useDepartments } from '../useDepartments'
 
 const fmtDT = (iso) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
@@ -13,10 +14,6 @@ export const FIELD_TYPES = [
 const LEAD_ATTRS = [
   ['', '—'], ['customer_name', 'Customer name'], ['phone', 'Phone'],
   ['email', 'Email'], ['company', 'Company'], ['requirement', 'Requirement'],
-]
-const DEPARTMENTS = [
-  ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'IT Team'], ['warehouse', 'Warehouse'], ['management', 'Management'],
 ]
 const NEEDS_OPTIONS = ['dropdown', 'radio', 'checkbox']
 
@@ -155,6 +152,7 @@ function ManageList({ onOpen, onSubs }) {
 /* ---------------- Builder ---------------- */
 
 function Builder({ formId, onBack, onSubs }) {
+  const DEPARTMENTS = useDepartments()
   const [form, setForm] = useState(null)
   const [err, setErr] = useState('')
   const [copied, setCopied] = useState(false)

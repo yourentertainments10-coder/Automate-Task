@@ -83,6 +83,13 @@ class UserWriteSerializer(serializers.ModelSerializer):
             return attrs[field]
         return getattr(self.instance, field, None) if self.instance else None
 
+    def _checked(self, attrs, field):
+        """Creating: always check. Updating: only when the payload touches the
+        field. The user form always sends every field, so gaps still get
+        forced closed there -- but a one-field PATCH (change a role, fix a
+        surname) is not blocked by an unrelated blank."""
+        return self.instance is None or field in attrs
+
     def validate(self, attrs):
         """Every field the system actually depends on is mandatory. A blank
         one does not fail loudly -- it silently drops a notification or sends
@@ -91,22 +98,27 @@ class UserWriteSerializer(serializers.ModelSerializer):
         if self.instance is None and not attrs.get("password"):
             errors["password"] = "Password is required for new users."
 
-        if not str(self._current(attrs, "email") or "").strip():
+        if self._checked(attrs, "email")                 and not str(self._current(attrs, "email") or "").strip():
             errors["email"] = "Email is required — task and approval mails are sent here."
 
-        phone = "".join(ch for ch in str(self._current(attrs, "whatsapp_phone") or "")
-                        if ch.isdigit())
-        if not phone:
-            errors["whatsapp_phone"] = (
-                "WhatsApp number is required — without it this person gets no "
-                "WhatsApp alerts.")
-        elif len(phone) not in (10, 12):
-            errors["whatsapp_phone"] = (
-                "Enter a 10-digit mobile number (or 12 digits with the 91 country code).")
+        if self._checked(attrs, "whatsapp_phone"):
+            phone = "".join(ch for ch in str(self._current(attrs, "whatsapp_phone") or "")
+                            if ch.isdigit())
+            if not phone:
+                errors["whatsapp_phone"] = (
+                    "WhatsApp number is required — without it this person gets "
+                    "no WhatsApp alerts.")
+            elif len(phone) not in (10, 12):
+                errors["whatsapp_phone"] = (
+                    "Enter a 10-digit mobile number (or 12 digits with the 91 "
+                    "country code).")
 
         role = self._current(attrs, "role")
         manager = self._current(attrs, "reporting_manager")
-        if role != Role.ADMIN and not manager:
+        # also demanded when a role CHANGE lands somebody in a post that needs
+        # an approver above them
+        needs_manager = self._checked(attrs, "reporting_manager") or "role" in attrs
+        if needs_manager and role != Role.ADMIN and not manager:
             errors["reporting_manager"] = (
                 "Reports to is required — change requests go one step up to "
                 "this person. Without it they fall back to the admins.")

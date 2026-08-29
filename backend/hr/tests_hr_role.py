@@ -96,8 +96,12 @@ class HrManagerRoleTests(Base):
         self.assertEqual(self.client.patch(f"/api/users/{self.hr.id}/",
                                            {"role": "sales_manager"}).status_code, 403)
         # but ordinary onboarding still works
-        res = self.client.post("/api/users/", {"username": "newjoinee", "password": "newjoin@12345",
-                                               "role": "sales_executive", "department": "sales"})
+        res = self.client.post("/api/users/", {
+            "username": "newjoinee", "password": "newjoin@12345",
+            "role": "sales_executive", "department": "sales",
+            # email / phone / reports-to are mandatory now
+            "email": "newjoinee@x.com", "whatsapp_phone": "9876543210",
+            "reporting_manager": self.hr.id})
         self.assertEqual(res.status_code, 201)
         # ...and an Admin is still free to grant the admin role
         self.as_(self.admin)

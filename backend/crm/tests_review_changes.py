@@ -55,9 +55,14 @@ class CategoryTests(Base):
         self.assertNotIn("Onboarding", names)  # hr only
 
     def test_only_managers_write_categories(self):
+        """An employee's POST is a REQUEST, not a category: it is accepted but
+        stays pending and never reaches the dropdown until a manager approves."""
         self.as_(self.rahul)
-        self.assertEqual(self.client.post(
-            "/api/task-categories/", {"name": "Nope"}).status_code, 403)
+        res = self.client.post("/api/task-categories/", {"name": "Nope"})
+        self.assertEqual(res.status_code, 201)
+        self.assertTrue(res.data["pending"])
+        self.assertNotIn("Nope", {c["name"] for c in
+                                  self.client.get("/api/task-categories/").data})
         self.as_(self.manager)
         res = self.client.post("/api/task-categories/",
                                {"name": "Test Drives", "department": "sales"})
@@ -131,7 +136,8 @@ class EscalateTests(Base):
         res = self.create_task(self.manager, self.rahul)
         self.as_(self.rahul)
         self.client.post(f"/api/tasks/{res.data['id']}/request_change/",
-                         {"changes": {"priority": "high"}, "reason": "urgent"},
+                         {"changes": {"priority": "high"},
+                          "reason": "customer escalated this"},
                          format="json")
         return TaskChangeRequest.objects.latest("id")
 

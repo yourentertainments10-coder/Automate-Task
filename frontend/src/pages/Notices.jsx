@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
+import { useDepartments } from '../useDepartments'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -21,12 +22,6 @@ const ROLES = [
   ['it_lead', 'IT Lead'], ['developer', 'Developer'],
   ['warehouse_manager', 'Warehouse Manager'], ['warehouse', 'Warehouse Team'],
   ['rider', 'Rider'],
-]
-const DEPARTMENTS = [
-  ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'IT Team'], ['development', 'Developer Team'],
-  ['warehouse', 'Warehouse'],
-  ['hr', 'Human Resources'], ['management', 'Management'],
 ]
 
 export default function Notices() {
@@ -172,6 +167,7 @@ function NoticeManage() {
 }
 
 function NoticeModal({ initial, onClose, onSaved }) {
+  const DEPARTMENTS = useDepartments()
   const [f, setF] = useState(initial ? {
     title: initial.title, content: initial.content, category: initial.category,
     priority: initial.priority, audience_type: initial.audience_type,

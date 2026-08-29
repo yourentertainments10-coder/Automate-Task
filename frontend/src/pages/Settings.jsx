@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api, errorText } from '../api'
+import { clearDepartmentCache, useDepartments } from '../useDepartments'
 
-const DEPARTMENTS = [
-  ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'IT Team'], ['warehouse', 'Warehouse'], ['management', 'Management'],
-]
 
 export default function Settings() {
+  const DEPARTMENTS = useDepartments()
   const [rules, setRules] = useState([])
   const [team, setTeam] = useState([])
   const [taskCfg, setTaskCfg] = useState(null)
@@ -45,6 +43,7 @@ export default function Settings() {
           </div>
         </div>
       )}
+      <DepartmentManager onError={setErr} />
       <CategoryManager onError={setErr} />
       <p className="muted" style={{ marginBottom: 16 }}>
         Auto-assignment rules: when a new lead arrives without an assignee (manual entry,
@@ -60,14 +59,112 @@ export default function Settings() {
   )
 }
 
+/* Admin-managed department list — the dropdown every form reads. */
+function DepartmentManager({ onError }) {
+  const [rows, setRows] = useState(null)
+  const [name, setName] = useState('')
+  const [renaming, setRenaming] = useState(null)   // {code, name}
+
+  const load = () => api('/api/departments/')
+    .then(d => { setRows(d); clearDepartmentCache() })
+    .catch(e => onError(e.message))
+  useEffect(() => { load() }, [])
+
+  const add = async () => {
+    onError('')
+    try {
+      await api('/api/departments/', { method: 'POST', body: { name: name.trim() } })
+      setName(''); load()
+    } catch (e) { onError(errorText(e.data) || e.message) }
+  }
+  const rename = async () => {
+    onError('')
+    try {
+      await api(`/api/departments/${renaming.code}/`,
+                { method: 'PATCH', body: { name: renaming.name.trim() } })
+      setRenaming(null); load()
+    } catch (e) { onError(errorText(e.data) || e.message) }
+  }
+  const hide = async (d) => {
+    onError('')
+    try { await api(`/api/departments/${d.code}/`, { method: 'DELETE' }); load() }
+    catch (e) { onError(errorText(e.data) || e.message) }
+  }
+
+  return (
+    <div className="rule-card">
+      <div className="rule-head"><h3>Departments</h3></div>
+      <p className="muted small">
+        Every department dropdown in the app reads this list. Removing one only
+        takes it off the list — people and tasks already filed under it keep
+        their history, and a department still in use cannot be removed.
+      </p>
+      <div className="filters">
+        <input placeholder="New department name" value={name}
+          onChange={e => setName(e.target.value)} />
+        <button className="btn btn-primary" disabled={!name.trim()} onClick={add}>Add</button>
+      </div>
+      {rows && (
+        <table className="table" style={{ maxWidth: 520 }}>
+          <thead><tr><th>Department</th><th>Code</th><th /></tr></thead>
+          <tbody>
+            {rows.map(d => (
+              <tr key={d.code}>
+                <td>
+                  {renaming?.code === d.code ? (
+                    <input value={renaming.name} autoFocus
+                      onChange={e => setRenaming(r => ({ ...r, name: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') rename() }} />
+                  ) : <strong>{d.name}</strong>}
+                </td>
+                <td><code>{d.code}</code></td>
+                <td className="row-actions">
+                  {renaming?.code === d.code ? (
+                    <>
+                      <button className="btn btn-sm btn-primary" onClick={rename}>Save</button>
+                      <button className="btn btn-sm" onClick={() => setRenaming(null)}>✕</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="btn btn-sm"
+                        onClick={() => setRenaming({ code: d.code, name: d.name })}>Rename</button>
+                      <button className="btn btn-sm" onClick={() => hide(d)}>Remove</button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
 /* F1: managed task categories — admin CRUD with live task counts */
 function CategoryManager({ onError }) {
   const [cats, setCats] = useState(null)
   const [f, setF] = useState({ name: '', department: '' })
 
-  const load = () => api('/api/task-categories/?counts=true')
-    .then(setCats).catch(e => onError(e.message))
+  const [pending, setPending] = useState([])
+
+  const load = () => {
+    api('/api/task-categories/?counts=true').then(setCats).catch(e => onError(e.message))
+    api('/api/task-categories/?pending=true').then(setPending).catch(() => {})
+  }
   useEffect(() => { load() }, [])
+
+  const decide = async (c, verdict) => {
+    onError('')
+    const remarks = verdict === 'reject'
+      ? (window.prompt(`Why not add "${c.name}"? (optional — the requester sees this)`) ?? '')
+      : ''
+    try {
+      await api(`/api/task-categories/${c.id}/${verdict}/`,
+                { method: 'POST', body: { remarks } })
+      load()
+    } catch (e) { onError(errorText(e.data) || e.message) }
+  }
 
   const add = async () => {
     onError('')
@@ -90,6 +187,29 @@ function CategoryManager({ onError }) {
         creating a task). Deleting hides a category from the dropdown —
         existing tasks keep their history; re-adding the name brings it back.
       </p>
+      {pending.length > 0 && (
+        <div style={{ margin: '10px 0' }}>
+          <strong className="small">Requests waiting for you ({pending.length})</strong>
+          <table className="table" style={{ maxWidth: 560, marginTop: 6 }}>
+            <thead><tr><th>Category</th><th>Asked by</th><th>Department</th><th /></tr></thead>
+            <tbody>
+              {pending.map(c => (
+                <tr key={c.id}>
+                  <td><strong>{c.name}</strong></td>
+                  <td>{c.requested_by_name || '—'}</td>
+                  <td>{c.department_display || 'General'}</td>
+                  <td className="row-actions">
+                    <button className="btn btn-sm btn-primary"
+                      onClick={() => decide(c, 'approve')}>Approve</button>
+                    <button className="btn btn-sm"
+                      onClick={() => decide(c, 'reject')}>Reject</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="filters">
         <input placeholder="New category name" value={f.name}
           onChange={e => setF(p => ({ ...p, name: e.target.value }))} />

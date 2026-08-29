@@ -146,6 +146,11 @@ class WebhookTests(TestCase):
     def setUp(self):
         self.rahul = make("rahul", Role.SALES_EXECUTIVE)
         AssignmentRule.objects.create(department="sales", member_ids=[self.rahul.pk])
+        # the suite must not depend on the developer's .env: a real
+        # WHATSAPP_APP_SECRET there makes the webhook demand a signature
+        patcher = mock.patch.dict("os.environ", {"WHATSAPP_APP_SECRET": ""})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_get_verify_handshake(self):
         with mock.patch.dict("os.environ", {"WHATSAPP_WEBHOOK_VERIFY_TOKEN": "tok123"}):

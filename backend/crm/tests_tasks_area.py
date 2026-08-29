@@ -6,7 +6,9 @@ from rest_framework.test import APIClient
 
 from accounts.models import Role, User
 
-from .models import Holiday, Task, TaskTemplate
+from notifications.models import Notification
+
+from .models import Holiday, Task, TaskCategory, TaskTemplate
 
 
 def make(username, role, department="sales", **kw):
@@ -54,7 +56,7 @@ class ScopeTabTests(Base):
 
     def test_creator_auto_subscribes_via_api(self):
         self.as_(self.manager)
-        res = self.client.post("/api/tasks/", {"title": "New", "assigned_to": self.rahul.id,
+        res = self.client.post("/api/tasks/", {"due_at": (timezone.now() + timedelta(days=1)).isoformat(), "title": "New", "assigned_to": self.rahul.id,
                                                "effort_minutes": 30})
         task = Task.objects.get(pk=res.data["id"])
         self.assertTrue(task.subscribers.filter(pk=self.manager.pk).exists())
@@ -162,7 +164,7 @@ class TemplateHolidayTests(Base):
 
     def test_activities_feed_scoped(self):
         self.as_(self.manager)
-        res = self.client.post("/api/tasks/", {"title": "Audit me", "assigned_to": self.rahul.id,
+        res = self.client.post("/api/tasks/", {"due_at": (timezone.now() + timedelta(days=1)).isoformat(), "title": "Audit me", "assigned_to": self.rahul.id,
                                                "effort_minutes": 30})
         self.as_(self.rahul)
         acts = self.client.get("/api/task-activities/").data
@@ -208,3 +210,69 @@ class TeamDirectoryTests(Base):
         self.as_(self.rahul)
         names = [r["username"] for r in self.client.get("/api/team/").data]
         self.assertNotIn("amit", names)
+
+
+class CategoryRequestTests(Base):
+    """An employee cannot add a category outright — they request it and a
+    manager approves. Managers/admin still add straight away."""
+
+    def test_employee_request_needs_approval(self):
+        self.rahul.reporting_manager = self.manager
+        self.rahul.save(update_fields=["reporting_manager"])
+        self.as_(self.rahul)
+        res = self.client.post("/api/task-categories/",
+                               {"name": "Stock audit", "department": "sales"},
+                               format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertTrue(res.data["pending"])
+        # it must NOT show up in the dropdown yet
+        names = [c["name"] for c in self.client.get("/api/task-categories/").data]
+        self.assertNotIn("Stock audit", names)
+        # the manager was told, and sees it in their pending list
+        self.assertTrue(Notification.objects.filter(
+            user=self.manager, type="category_request").exists())
+        self.as_(self.manager)
+        pend = self.client.get("/api/task-categories/?pending=true").data
+        self.assertEqual([c["name"] for c in pend], ["Stock audit"])
+
+        cid = pend[0]["id"]
+        self.assertEqual(self.client.post(
+            f"/api/task-categories/{cid}/approve/").status_code, 200)
+        names = [c["name"] for c in self.client.get("/api/task-categories/").data]
+        self.assertIn("Stock audit", names)
+        self.assertTrue(Notification.objects.filter(
+            user=self.rahul, type="category_request",
+            title__icontains="approved").exists())
+
+    def test_manager_adds_straight_away(self):
+        self.as_(self.manager)
+        res = self.client.post("/api/task-categories/",
+                               {"name": "Site visit", "department": "sales"},
+                               format="json")
+        self.assertEqual(res.status_code, 201)
+        self.assertFalse(res.data["pending"])
+        self.assertIn("Site visit",
+                      [c["name"] for c in self.client.get("/api/task-categories/").data])
+
+    def test_employee_cannot_see_or_approve_requests(self):
+        self.as_(self.rahul)
+        self.client.post("/api/task-categories/", {"name": "Ad hoc"}, format="json")
+        self.assertEqual(self.client.get("/api/task-categories/?pending=true").data, [])
+        cid = TaskCategory.objects.get(name="Ad hoc").id
+        self.assertEqual(self.client.post(
+            f"/api/task-categories/{cid}/approve/").status_code, 403)
+
+    def test_rejection_tells_the_requester(self):
+        self.rahul.reporting_manager = self.manager
+        self.rahul.save(update_fields=["reporting_manager"])
+        self.as_(self.rahul)
+        self.client.post("/api/task-categories/", {"name": "Random"}, format="json")
+        cid = TaskCategory.objects.get(name="Random").id
+        self.as_(self.manager)
+        self.assertEqual(self.client.post(f"/api/task-categories/{cid}/reject/",
+                                          {"remarks": "Use 'Calls' instead"},
+                                          format="json").status_code, 200)
+        self.assertFalse(TaskCategory.objects.filter(name="Random").exists())
+        note = Notification.objects.get(user=self.rahul, type="category_request")
+        self.assertIn("not added", note.title)
+        self.assertIn("Use 'Calls' instead", note.body)

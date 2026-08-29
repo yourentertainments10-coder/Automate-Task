@@ -42,7 +42,11 @@ class Base(TestCase):
         # effort_minutes is mandatory at the API since B6 — every helper
         # call gets one unless the test overrides it
         body = {"title": "T", "assigned_to": assignee.id,
-                "effort_minutes": 30, **extra}
+                "effort_minutes": 30,
+                # due_at is mandatory too — no due date means no reminder,
+                # no overdue flag and no on-time score
+                "due_at": (timezone.now() + timedelta(days=1)).isoformat(),
+                **extra}
         return self.client.post("/api/tasks/", body, format="json")
 
 
@@ -224,7 +228,7 @@ class ChangeRequestTests(Base):
             title="Report", assigned_to=self.rahul, created_by=self.manager,
             due_at=timezone.now() + timedelta(days=1), frequency="daily")
 
-    def raise_request(self, as_user, changes, reason="wrong deadline"):
+    def raise_request(self, as_user, changes, reason="the deadline moved"):
         self.as_(as_user)
         return self.client.post(f"/api/tasks/{self.task.id}/request_change/",
                                 {"changes": changes, "reason": reason}, format="json")
@@ -307,7 +311,8 @@ class ChangeRequestTests(Base):
 
     def test_assignee_request_never_reaches_admin(self):
         """The person who GAVE the task decides -- admins stay out of it."""
-        res = self.raise_request(self.rahul, {"priority": "high"}, "urgent now")
+        res = self.raise_request(self.rahul, {"priority": "high"},
+                                 "customer wants it today")
         self.assertEqual(res.status_code, 201)
         self.assertTrue(Notification.objects.filter(
             user=self.manager, type="task_change_request").exists())

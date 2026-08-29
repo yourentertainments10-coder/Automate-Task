@@ -1,7 +1,7 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from .models import Role, User
+from .models import DepartmentOption, Role, User
 
 
 def make(username, role, password="pass@12345"):
@@ -167,3 +167,74 @@ class UserManagementTests(TestCase):
         # password unchanged -- login still works
         c2 = APIClient()
         self.assertEqual(c2.post("/api/auth/login", {"username": "neha", "password": "pass@12345"}).status_code, 200)
+
+
+class DepartmentListTests(TestCase):
+    """The department dropdown is data, not code: Admin can add/rename/remove
+    it from Settings and every form picks the change up."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make("boss", Role.ADMIN)
+        self.emp = make("neha", Role.SALES_EXECUTIVE)
+
+    def as_(self, username):
+        res = self.client.post("/api/auth/login",
+                               {"username": username, "password": "pass@12345"})
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {res.data['access']}")
+
+    def test_everyone_reads_the_seeded_list(self):
+        self.as_("neha")
+        res = self.client.get("/api/departments/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("sales", [d["code"] for d in res.data])
+
+    def test_only_admin_adds(self):
+        self.as_("neha")
+        self.assertEqual(self.client.post("/api/departments/",
+                                          {"name": "Logistics"}).status_code, 403)
+        self.as_("boss")
+        res = self.client.post("/api/departments/", {"name": "Logistics"})
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["code"], "logistics")
+
+    def test_a_user_can_be_put_in_a_brand_new_department(self):
+        self.as_("boss")
+        self.client.post("/api/departments/", {"name": "Logistics"})
+        res = self.client.post("/api/users/", {
+            "username": "logi", "email": "logi@x.com", "password": "sonal@12345",
+            "role": "warehouse", "department": "logistics",
+            "whatsapp_phone": "9876543210", "reporting_manager": self.admin.id,
+        })
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(User.objects.get(username="logi").department, "logistics")
+
+    def test_unknown_department_is_rejected(self):
+        self.as_("boss")
+        res = self.client.post("/api/users/", {
+            "username": "ghost", "email": "g@x.com", "password": "sonal@12345",
+            "role": "warehouse", "department": "does-not-exist",
+            "whatsapp_phone": "9876543210", "reporting_manager": self.admin.id,
+        })
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("department", res.data)
+
+    def test_rename_keeps_the_code(self):
+        self.as_("boss")
+        res = self.client.patch("/api/departments/support/", {"name": "IT & Systems"})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["code"], "support")
+        self.assertEqual(DepartmentOption.objects.get(code="support").name, "IT & Systems")
+
+    def test_department_in_use_cannot_be_removed(self):
+        self.as_("boss")
+        res = self.client.delete("/api/departments/sales/")   # neha is in sales
+        self.assertEqual(res.status_code, 400)
+        self.assertTrue(DepartmentOption.objects.get(code="sales").active)
+
+    def test_empty_department_is_removed_from_the_list(self):
+        self.as_("boss")
+        self.client.post("/api/departments/", {"name": "Logistics"})
+        self.assertEqual(self.client.delete("/api/departments/logistics/").status_code, 200)
+        codes = [d["code"] for d in self.client.get("/api/departments/").data]
+        self.assertNotIn("logistics", codes)

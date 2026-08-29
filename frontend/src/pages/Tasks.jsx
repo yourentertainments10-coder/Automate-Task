@@ -9,6 +9,7 @@ import Directory from './Directory'
 import PersonProfile from './PersonProfile'
 import TaskDetailPanel from './TaskDetail'
 import { ChangeRequests, CompleteModal, DeletedTasks, ProgressModal, RequestChangeModal, WorkloadPanel } from './TaskExtras'
+import { useDepartments } from '../useDepartments'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
@@ -34,12 +35,6 @@ export const fmtEffort = (min) => {
   return min % 60 === 0 ? `${min / 60}h` : `${Math.floor(min / 60)}h ${min % 60}m`
 }
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']]
-const DEPARTMENTS = [
-  ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'IT Team'], ['development', 'Developer Team'],
-  ['warehouse', 'Warehouse'],
-  ['hr', 'Human Resources'], ['management', 'Management'],
-]
 const FREQUENCIES = [['one_time', 'One time'], ['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']]
 const RANGES = [
   ['today', 'Today'], ['yesterday', 'Yesterday'], ['this_week', 'This Week'],
@@ -653,8 +648,29 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
 }
 
 function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
+  const DEPARTMENTS = useDepartments()
   const { can } = useAuth()
   const canAddCategory = can('tasks.assign')
+  const [catBox, setCatBox] = useState(null)     // null = closed, '' = typing
+  const [catNote, setCatNote] = useState('')
+
+  const submitCategory = async () => {
+    const name = (catBox || '').trim()
+    if (!name) return
+    setErr(''); setCatNote('')
+    try {
+      const cat = await api('/api/task-categories/', {
+        method: 'POST', body: { name, department: f.department },
+      })
+      setCatBox(null)
+      if (cat.pending) {
+        setCatNote(`Sent — "${cat.name}" is waiting for your manager's approval.`)
+      } else {
+        setCategories(prev => [...prev.filter(c => c.id !== cat.id), cat])
+        setF(prev => ({ ...prev, category: cat.name }))
+      }
+    } catch (ex) { setErr(errorText(ex.data) || ex.message) }
+  }
   const [f, setF] = useState({
     title: template?.title || '', description: template?.description || '',
     category: template?.category || '', frequency: template?.frequency || 'one_time',
@@ -790,17 +806,41 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
           </div>
           <div>
             <label>Category *</label>
-            <select value={f.category} onChange={set('category')}>
-              <option value="">— pick a category —</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.name}>
-                  {c.name}{c.department ? '' : ' (general)'}
-                </option>
-              ))}
-            </select>
-            {canAddCategory && (
-              <div className="muted small">
-                Need a new one? Add it in <strong>Settings → Task categories</strong>.
+            {catBox === null ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <select value={f.category} onChange={set('category')} style={{ flex: 1 }}>
+                  <option value="">— pick a category —</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}{c.department ? '' : ' (general)'}
+                    </option>
+                  ))}
+                </select>
+                {/* managers/admin add outright; everyone else asks for it */}
+                <button type="button" className="btn btn-sm"
+                  title={canAddCategory ? 'Add a new category'
+                    : 'Ask your manager to add a new category'}
+                  onClick={() => setCatBox('')}>
+                  {canAddCategory ? '+' : '+ request'}
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input value={catBox} onChange={e => setCatBox(e.target.value)} autoFocus
+                    placeholder={canAddCategory ? 'New category name' : 'Category you need…'}
+                    style={{ flex: 1 }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitCategory() } }} />
+                  <button type="button" className="btn btn-sm btn-primary"
+                    onClick={submitCategory}>{canAddCategory ? 'Add' : 'Send request'}</button>
+                  <button type="button" className="btn btn-sm" onClick={() => setCatBox(null)}>✕</button>
+                </div>
+                <div className="muted small">
+                  {canAddCategory
+                    ? 'It goes straight into the list for everyone.'
+                    : 'Your manager gets this and approves it — pick an existing category for now.'}
+                </div>
+                {catNote && <div className="muted small"><strong>{catNote}</strong></div>}
               </div>
             )}
           </div>

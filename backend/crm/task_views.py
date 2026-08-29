@@ -40,6 +40,21 @@ def _admins():
     return User.objects.filter(is_active=True, role__in=admin_roles)
 
 
+def NL_JOIN(lines):
+    """Join notification body lines. Named so the literal newline never has to
+    survive a shell round-trip in tooling."""
+    return chr(10).join(lines)
+
+
+def _category_approvers(requester):
+    """Who can turn a category request into a real category: the requester's
+    own manager if they may assign tasks, otherwise the admins."""
+    manager = requester.reporting_manager
+    if manager and manager.is_active and has_capability(manager, "tasks.assign"):
+        return [manager]
+    return list(_admins().exclude(pk=requester.pk))
+
+
 def _approvers_for(req: TaskChangeRequest):
     """Who decides a Modification Request. The rule is "one step up from
     the person asking", never a broadcast to every admin:
@@ -1396,17 +1411,70 @@ class TaskCategoryViewSet(viewsets.ModelViewSet):
         return TaskCategorySerializer
 
     def get_permissions(self):
-        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+        # NOTE: this override replaces the @action permission_classes, so the
+        # approve/reject actions must be listed here explicitly.
+        if getattr(self, "action", None) in ("approve", "reject"):
+            return [HasCapability.of("tasks.assign")()]
+        # POST is otherwise open to everyone: managers/admin add outright, an
+        # employee's POST becomes a request instead (handled in create()).
+        if self.request.method in ("GET", "HEAD", "OPTIONS", "POST"):
             return [IsAuthenticated()]
         return [HasCapability.of("tasks.assign")()]
 
     def get_queryset(self):
         from django.db.models import Q as _Q
-        qs = TaskCategory.objects.filter(active=True)
+        if self.request.query_params.get("pending") == "true":
+            if not has_capability(self.request.user, "tasks.assign"):
+                return TaskCategory.objects.none()
+            return TaskCategory.objects.filter(pending=True).select_related("requested_by")
+        qs = TaskCategory.objects.filter(active=True, pending=False)
         department = self.request.query_params.get("department")
         if department is not None:
             qs = qs.filter(_Q(department="") | _Q(department=department))
         return qs
+
+    @action(detail=True, methods=["post"],
+            permission_classes=[HasCapability.of("tasks.assign")])
+    def approve(self, request, pk=None):
+        """Turn an employee's request into a real category."""
+        cat = TaskCategory.objects.filter(pk=pk, pending=True).first()
+        if not cat:
+            raise ValidationError({"detail": "No pending request with that id."})
+        cat.pending, cat.active = False, True
+        cat.created_by = request.user
+        cat.save(update_fields=["pending", "active", "created_by"])
+        if cat.requested_by and cat.requested_by.is_active:
+            notify(cat.requested_by, "category_request",
+                   f"Category approved: {cat.name}"[:200],
+                   NL_JOIN([
+                       f"Category: {cat.name}",
+                       f"Approved by: {request.user.get_full_name() or request.user.username}",
+                       "",
+                       "It is now in the category dropdown — you can pick it on any task.",
+                   ]), link="/tasks")
+        return Response(self.get_serializer(cat).data)
+
+    @action(detail=True, methods=["post"],
+            permission_classes=[HasCapability.of("tasks.assign")])
+    def reject(self, request, pk=None):
+        cat = TaskCategory.objects.filter(pk=pk, pending=True).first()
+        if not cat:
+            raise ValidationError({"detail": "No pending request with that id."})
+        name, asker = cat.name, cat.requested_by
+        remarks = str(request.data.get("remarks", "")).strip()
+        cat.delete()
+        if asker and asker.is_active:
+            notify(asker, "category_request",
+                   f"Category not added: {name}"[:200],
+                   NL_JOIN([
+                       f"Category: {name}",
+                       f"Reviewed by: {request.user.get_full_name() or request.user.username}",
+                       "",
+                       "This was not added to the list."
+                   ] + ([f"Reason: {remarks}"] if remarks else [])
+                     + ["", "Pick the closest existing category, or ask your manager."]),
+                   link="/tasks")
+        return Response({"detail": "Request rejected."})
 
     def list(self, request, *args, **kwargs):
         """F1: ?counts=true adds live task counts per category (admin list)."""
@@ -1427,17 +1495,43 @@ class TaskCategoryViewSet(viewsets.ModelViewSet):
         existing = TaskCategory.objects.filter(
             name__iexact=name, department=department).first()
         if existing and not existing.active:
-            existing.active = True
-            existing.save(update_fields=["active"])
+            if not has_capability(request.user, "tasks.assign"):
+                # an employee cannot silently revive a category a manager hid
+                if existing.pending:
+                    raise ValidationError(
+                        {"name": "This category has already been requested — "
+                                 "your manager still has to approve it."})
+                raise ValidationError(
+                    {"name": "That category was removed. Ask your manager to bring it back."})
+            existing.active, existing.pending = True, False
+            existing.save(update_fields=["active", "pending"])
             return Response(self.get_serializer(existing).data, status=http.HTTP_201_CREATED)
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        """Managers and admin add straight away; anyone else raises a request
+        that lands in Settings for a manager to approve."""
+        user = self.request.user
+        if has_capability(user, "tasks.assign"):
+            serializer.save(created_by=user, active=True, pending=False)
+            return
+        cat = serializer.save(requested_by=user, active=False, pending=True)
+        for approver in _category_approvers(user):
+            notify(approver, "category_request",
+                   f"Category requested by {user.get_full_name() or user.username}: {cat.name}"[:200],
+                   NL_JOIN([
+                       f"Requested category: {cat.name}",
+                       f"For department: {cat.get_department_display() or 'All departments'}",
+                       f"Asked by: {user.get_full_name() or user.username}",
+                       "",
+                       "They could not find a category that fits their task.",
+                       "Approve or reject it in Settings -> Task categories.",
+                   ]), link="/tasks")
 
     def perform_destroy(self, instance):
         instance.active = False              # never lose reporting history
-        instance.save(update_fields=["active"])
+        instance.pending = False
+        instance.save(update_fields=["active", "pending"])
 
 
 class TaskSettingsView(viewsets.ViewSet):

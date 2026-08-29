@@ -156,18 +156,20 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
 
     def create(self, request, *args, **kwargs):
+        # Authority first, then input: checking the role AFTER validation let
+        # a missing field mask a 403 as a 400.
+        self._guard_role(request.data.get("role"))
         write = self.get_serializer(data=request.data)
         write.is_valid(raise_exception=True)
-        self._guard_role(write.validated_data.get("role"))
         user = write.save()
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         target = self.get_object()
+        self._guard_role(request.data.get("role"), target)
         write = self.get_serializer(target, data=request.data, partial=partial)
         write.is_valid(raise_exception=True)
-        self._guard_role(write.validated_data.get("role"), target)
         user = write.save()
         return Response(UserSerializer(user).data)
 

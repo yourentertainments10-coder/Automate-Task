@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, apiUpload, errorText } from '../api'
 import { useAuth } from '../auth'
+import { useDepartments } from '../useDepartments'
 
 export const STAGES = [
   ['new', 'New'],
@@ -15,10 +16,6 @@ const SOURCES = [
   ['web', 'Website'], ['indiamart', 'IndiaMART'], ['tradeindia', 'TradeIndia'], ['other', 'Other'],
 ]
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']]
-const DEPARTMENTS = [
-  ['sales', 'Sales'], ['purchase', 'Purchase'], ['accounts', 'Accounts'],
-  ['support', 'IT Team'], ['warehouse', 'Warehouse'], ['management', 'Management'],
-]
 
 export const fmtINR = (n) => {
   if (n === null || n === undefined || n === '') return null
@@ -199,6 +196,7 @@ export default function Leads() {
 
 /* ------------------------------------------------------------------ */
 function LeadModal({ canAssign, assignees, user, onClose, onSaved }) {
+  const DEPARTMENTS = useDepartments()
   const [f, setF] = useState({
     customer_name: '', phone: '', email: '', company: '', requirement: '',
     source: 'manual', department: user.department === 'management' ? 'sales' : user.department,
