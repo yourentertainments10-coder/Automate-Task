@@ -40,26 +40,74 @@ def purge_expired_attachments() -> int:
     return removed
 
 
+REMIND_EVERY_HOURS = 2      # WhatsApp automation C: re-ping while overdue
+
+
 def send_task_reminders() -> int:
-    """One 'task due' ping per due date -- same dedupe rule as follow-ups."""
+    """Due/overdue tasks ping the assignee — and KEEP pinging every
+    REMIND_EVERY_HOURS until the task is done (or the due date moves)."""
     now = timezone.now()
+    again_before = now - timezone.timedelta(hours=REMIND_EVERY_HOURS)
     due = (
         Task.objects.exclude(status=TaskStatus.DONE)
         .filter(deleted_at__isnull=True, due_at__isnull=False, due_at__lte=now)
-        .filter(Q(reminded_at__isnull=True) | Q(reminded_at__lt=F("due_at")))
+        .filter(Q(reminded_at__isnull=True) | Q(reminded_at__lte=again_before))
         .select_related("assigned_to", "lead")
     )
     sent = 0
     for task in due:
+        hours_over = int((now - task.due_at).total_seconds() // 3600)
+        state = f"OVERDUE by {hours_over}h" if hours_over >= 1 else "due now"
         notify(
             task.assigned_to, "task_due",
-            f"Task due: {task.title}",
-            (task.description or "")
+            f"Task due: {task.title}"[:200],
+            f"{task.code} · {state} · due {timezone.localtime(task.due_at):%d %b %H:%M}\n"
+            + (task.description[:200] if task.description else "")
             + (f"\nLead: {task.lead.customer_name}" if task.lead else ""),
             link="/tasks",
         )
         task.reminded_at = now
         task.save(update_fields=["reminded_at"])
+        sent += 1
+    return sent
+
+
+def send_daily_task_digest(force=False) -> int:
+    """One morning message per person: due today / overdue / open counts
+    with the top tasks — 'aaj ka plan' in a single ping, never spam."""
+    now = timezone.localtime()
+    if not force and now.hour < 9:
+        return 0
+    today = now.date()
+    from notifications.models import Notification
+
+    open_tasks = (Task.objects.exclude(status=TaskStatus.DONE)
+                  .filter(deleted_at__isnull=True)
+                  .select_related("assigned_to").order_by("due_at"))
+    per = {}
+    for t in open_tasks:
+        per.setdefault(t.assigned_to, []).append(t)
+
+    sent = 0
+    for user, tasks in per.items():
+        if not user.is_active:
+            continue
+        if Notification.objects.filter(user=user, type="task_daily",
+                                       created_at__date=today).exists():
+            continue    # once a day, no matter how often the ticker runs
+        overdue = [t for t in tasks if t.due_at and t.due_at < now]
+        due_today = [t for t in tasks if t.due_at
+                     and timezone.localtime(t.due_at).date() == today
+                     and t.due_at >= now]
+        lines = [f"⚠ {t.code} {t.title[:60]}" for t in overdue[:4]]
+        lines += [f"• {t.code} {t.title[:60]} ({timezone.localtime(t.due_at):%H:%M})"
+                  for t in due_today[:4]]
+        notify(
+            user, "task_daily",
+            f"Today: {len(due_today)} due · {len(overdue)} overdue · {len(tasks)} open"[:200],
+            "\n".join(lines) or "No deadlines today — clear the open list!",
+            link="/tasks",
+        )
         sent += 1
     return sent
 
@@ -83,6 +131,7 @@ def send_followup_reminders() -> int:
         lead.save(update_fields=["reminded_at"])
         sent += 1
     sent += send_task_reminders()
+    send_daily_task_digest()            # date-guarded: one per person per day
     purge_expired_attachments()
     from mistakes.sla import escalate_overdue_mistakes  # lazy: avoids app-load cycles
     from mistakes.digests import send_daily_manager_summaries, send_weekly_founder_digest

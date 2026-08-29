@@ -62,8 +62,29 @@ def _normalize(phone: str) -> str:
 
 
 def send_text(to_phone: str, body: str) -> dict:
+    """Notification entry point. When WHATSAPP_TEMPLATE_NAME is set (the
+    production mode), sends via the approved template — Meta only delivers
+    business-initiated messages outside a 24h window through templates.
+    Without it (dev/testing with verified numbers), sends free-form text."""
     if not to_phone:
         return {"channel": "whatsapp", "status": "skipped", "detail": "user has no whatsapp number"}
+    template = os.environ.get("WHATSAPP_TEMPLATE_NAME", "").strip()
+    if template:
+        # template body params reject newlines/tabs — flatten to one line
+        clean = " · ".join(part.strip() for part in body.splitlines() if part.strip())[:1000]
+        return _post({
+            "messaging_product": "whatsapp",
+            "to": _normalize(to_phone),
+            "type": "template",
+            "template": {
+                "name": template,
+                "language": {"code": os.environ.get("WHATSAPP_TEMPLATE_LANG", "en").strip() or "en"},
+                "components": [{
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": clean or "You have an update."}],
+                }],
+            },
+        })
     return _post({
         "messaging_product": "whatsapp",
         "to": _normalize(to_phone),

@@ -61,16 +61,53 @@ def can_review_request(user, req: TaskChangeRequest) -> bool:
 
 
 def _notify_task_assigned(task, actor):
+    """WhatsApp automation A: the assignment ping carries ALL the details —
+    one message tells the whole story."""
     if task.assigned_to_id == actor.id:
         return
-    due = f" (due {timezone.localtime(task.due_at):%d %b %H:%M})" if task.due_at else ""
+    bits = [f"{task.code} · {task.title}"]
+    if task.description:
+        bits.append(task.description[:300])
+    facts = []
+    if task.due_at:
+        facts.append(f"Due: {timezone.localtime(task.due_at):%d %b %H:%M}")
+    if task.effort_minutes:
+        facts.append(f"Effort: {task.effort_minutes}m")
+    if task.priority != "normal":
+        facts.append(f"Priority: {task.get_priority_display()}")
+    if task.category:
+        facts.append(f"Category: {task.category}")
+    if task.frequency != TaskFrequency.ONE_TIME:
+        facts.append(f"Repeats: {task.get_frequency_display()}"
+                     + (f" till {task.repeat_until:%d %b}" if task.repeat_until else ""))
+    if task.lead:
+        facts.append(f"Lead: {task.lead.customer_name}")
+    if facts:
+        bits.append(" · ".join(facts))
+    bits.append(f"Assigned by: {actor.get_full_name() or actor.username}")
     notify(
         task.assigned_to, "task_assigned",
-        f"Task assigned: {task.title}",
-        (task.description or "") + due
-        + (f"\nLead: {task.lead.customer_name}" if task.lead else ""),
+        f"Task assigned: {task.title}"[:200],
+        "\n".join(bits),
         link="/tasks",
     )
+
+
+def _notify_task_completed(task, actor):
+    """WhatsApp automation B: completion goes to EVERYONE involved — the
+    creator, the assignee (when someone else closed it) and all followers
+    (in-loop subscribers)."""
+    took = f" — took {task.actual_minutes}m" if task.actual_minutes else ""
+    assigned = f" (assigned {task.effort_minutes}m)" if task.effort_minutes else ""
+    body = (f"{task.code} · {task.title}\nCompleted by "
+            f"{actor.get_full_name() or actor.username}{took}{assigned}."
+            + (f"\nNote: {task.completion_note[:200]}" if task.completion_note else ""))
+    targets = {task.created_by, task.assigned_to}
+    targets.update(task.subscribers.all())
+    for target in targets:
+        if target and target.is_active and target.pk != actor.pk:
+            notify(target, "task_completed",
+                   f"✅ Completed: {task.title}"[:200], body, link="/tasks")
 
 
 def _advance_due(due, frequency):
@@ -311,6 +348,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         if updated.status == TaskStatus.DONE and old_status != TaskStatus.DONE:
             updated.completed_at = timezone.now()
             updated.save(update_fields=["completed_at"])
+            _notify_task_completed(updated, user)
             self._sync_linked_mistake(updated, user)
             if updated.lead:
                 LeadEvent.objects.create(

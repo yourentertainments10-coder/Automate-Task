@@ -267,16 +267,19 @@ correction → Dept Head owns repeats → Founder sees only serious escalations.
 
 ## Phase N — Notifications & WhatsApp CRM (25 Aug list) — assessment done
 
-- [ ] **N1 · Overdue WhatsApp reminders every 2h** (~half day code): change
-      the reminder dedupe from one-ping-per-due-date to re-ping every 2h
-      while overdue; WhatsApp channel is already coded — BLOCKED on Meta
-      credentials + an approved message template (business-initiated
-      messages outside the 24h window require templates).
-- [ ] **N2 · Daily pending-tasks email per employee** (~half day): same
-      digest pattern as the mistake digests; Gmail sender already coded —
-      BLOCKED on Google OAuth credentials.
-- [x] **N3 · Instant assignment alerts** — already live (in-app now;
-      WhatsApp/email join automatically once credentials are set).
+- [x] **N1 · Overdue reminders every 2h** — CODE DONE 28 Aug: due/overdue
+      tasks re-ping the assignee every 2h (REMIND_EVERY_HOURS) with an
+      "OVERDUE by Xh" body until completed. Delivery on WhatsApp still
+      awaits the Meta token + approved `task_update` template + Live mode.
+- [x] **N2 · Daily pending-tasks digest** — DONE 28 Aug:
+      `send_daily_task_digest()` (ticker, ≥9am, once/person/day): "Today:
+      X due · Y overdue · Z open" + top task lines. Goes out via email
+      ALREADY (Gmail live) and WhatsApp once Meta unblocks.
+- [x] **N3 · Instant assignment alerts** — upgraded 28 Aug: the ping now
+      carries ALL details (code, description, due, effort, priority,
+      category, recurrence, lead, assigned-by). NEW: completion fan-out —
+      creator + assignee + in-loop followers get "✅ Completed … took Xm
+      (assigned Ym) + note" (never the actor).
 - [x] **N4 · WhatsApp → auto-lead capture** — already built (intake webhook
       → AI/rules classify → lead → auto-assign). Needs Meta webhook pointed
       at the Render URL + credentials.

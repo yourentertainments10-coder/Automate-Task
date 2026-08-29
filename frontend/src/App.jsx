@@ -194,6 +194,42 @@ function ChangePasswordModal({ onClose }) {
   )
 }
 
+/* Public page — Meta requires a Privacy Policy URL to take the app Live. */
+function Privacy() {
+  return (
+    <div style={{ maxWidth: 680, margin: '40px auto', padding: '0 20px', lineHeight: 1.6 }}>
+      <h1>Privacy Policy — Automation Task</h1>
+      <p><em>CarTrends internal operations system · effective August 2026</em></p>
+      <p>
+        Automation Task is an internal tool used only by CarTrends employees
+        for work management: tasks, attendance, leave, payroll and internal
+        communication.
+      </p>
+      <h3>What we store</h3>
+      <p>
+        Employee work profile (name, work email, phone number, role,
+        department), work records (tasks, status updates, attendance
+        check-ins including optional location and face-match data where
+        enabled, leave and payroll records) and notification logs.
+      </p>
+      <h3>How it is used</h3>
+      <p>
+        Only to run CarTrends&rsquo; internal operations — assigning work,
+        attendance, payroll and sending work notifications in-app, by email
+        and on WhatsApp. Data is never sold or shared with third parties,
+        except the delivery providers used to send notifications
+        (Google Gmail API, Meta WhatsApp Business API).
+      </p>
+      <h3>Access &amp; contact</h3>
+      <p>
+        Access is restricted by role. Employees can view their own records in
+        the app. For questions or corrections, contact
+        {' '}<a href="mailto:developer.team@cartrends.in">developer.team@cartrends.in</a>.
+      </p>
+    </div>
+  )
+}
+
 function Protected({ children, capability }) {
   const { user, ready, can } = useAuth()
   if (!ready) return <div className="center-note">Loading…</div>
@@ -208,6 +244,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/privacy" element={<Privacy />} />
           <Route path="/f/:token" element={<PublicForm />} />
           <Route path="/" element={<Protected><Home /></Protected>} />
           <Route path="/leads" element={<Protected><Leads /></Protected>} />
