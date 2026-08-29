@@ -150,10 +150,17 @@ class TaskSerializer(serializers.ModelSerializer):
 class TaskActivitySerializer(serializers.ModelSerializer):
     actor = UserBriefSerializer(read_only=True)
     task_title = serializers.CharField(source="task.title", read_only=True)
+    task_code = serializers.CharField(source="task.code", read_only=True)
+    task_assignee = serializers.SerializerMethodField()
 
     class Meta:
         model = TaskActivity
-        fields = ["id", "task", "task_title", "actor", "text", "kind", "created_at"]
+        fields = ["id", "task", "task_title", "task_code", "task_assignee",
+                  "actor", "text", "kind", "created_at"]
+
+    def get_task_assignee(self, obj):
+        who = obj.task.assigned_to if obj.task_id else None
+        return (who.get_full_name() or who.username) if who else None
 
 
 class TaskChecklistItemSerializer(serializers.ModelSerializer):

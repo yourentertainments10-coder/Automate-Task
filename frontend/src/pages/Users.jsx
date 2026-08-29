@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
+import PersonProfile from './PersonProfile'
 import { WorkloadPanel } from './TaskExtras'
 
 /* C2: fetch-on-expand workload for one team member */
@@ -63,6 +64,7 @@ function Directory() {
   const [q, setQ] = useState('')
   const [fRole, setFRole] = useState('')
   const [wlFor, setWlFor] = useState(null)   // C2: which member's workload is open
+  const [profileFor, setProfileFor] = useState(null)  // name click -> full drill-down
   const [err, setErr] = useState('')
 
   useEffect(() => { api('/api/team/').then(setRows).catch(e => setErr(e.message)) }, [])
@@ -102,7 +104,8 @@ function Directory() {
             <>
               <tr key={u.id}>
                 <td>
-                  <strong>{u.name}</strong>
+                  <button className="link-name" title="Open full task profile"
+                    onClick={() => setProfileFor(u)}>{u.name}</button>
                   <div className="muted small">{u.email || '@' + u.username}</div>
                 </td>
                 <td>{u.mobile || '—'}</td>
@@ -125,6 +128,10 @@ function Directory() {
           ))}
         </tbody>
       </table>
+      {profileFor && (
+        <PersonProfile userId={profileFor.id} name={profileFor.name}
+          onClose={() => setProfileFor(null)} />
+      )}
     </div>
   )
 }
@@ -139,6 +146,7 @@ function ManageTeam() {
   const [fRole, setFRole] = useState('')
   const [fManager, setFManager] = useState('')
   const [wlFor, setWlFor] = useState(null)       // C2: which member's workload is open
+  const [profileFor, setProfileFor] = useState(null)  // name click -> full drill-down
   const [err, setErr] = useState('')
 
   const load = () => api('/api/users/?page_size=200').then(d => setRows(d.results || d)).catch(e => setErr(e.message))
@@ -195,7 +203,10 @@ function ManageTeam() {
             <>
               <tr key={u.id} className={u.is_active ? '' : 'inactive'}>
                 <td>
-                  <strong>{u.first_name || u.username} {u.last_name}</strong>
+                  <button className="link-name" title="Open full task profile"
+                    onClick={() => setProfileFor(u)}>
+                    {u.first_name || u.username} {u.last_name}
+                  </button>
                   <div className="muted small">{u.email || '@' + u.username}</div>
                 </td>
                 <td>{u.whatsapp_phone || '—'}</td>
@@ -226,6 +237,12 @@ function ManageTeam() {
           ))}
         </tbody>
       </table>
+
+      {profileFor && (
+        <PersonProfile userId={profileFor.id}
+          name={`${profileFor.first_name || profileFor.username} ${profileFor.last_name || ''}`.trim()}
+          onClose={() => setProfileFor(null)} />
+      )}
 
       {editing && (
         <UserModal

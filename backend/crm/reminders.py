@@ -60,7 +60,7 @@ def send_task_reminders() -> int:
         state = f"OVERDUE by {hours_over}h" if hours_over >= 1 else "due now"
         wa_template = None
         if hours_over >= 1:  # the approved template reads "OVERDUE by {{3}}"
-            wa_template = ("task_overdue_reminder", [
+            wa_template = ("task_overdue_reminde", [
                 task.assigned_to.get_full_name() or task.assigned_to.username,
                 f"{task.code} · {task.title}",
                 f"{hours_over}h",

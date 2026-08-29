@@ -91,7 +91,7 @@ def _notify_task_assigned(task, actor):
         f"Task assigned by {who}: {task.title}"[:200],
         "\n".join(bits),
         link="/tasks",
-        wa_template=("new_task_assigned", [
+        wa_template=("new_task_assigne", [
             task.assigned_to.get_full_name() or task.assigned_to.username,
             f"{task.code} · {task.title}",
             task.description or "—",
@@ -111,12 +111,20 @@ def _notify_task_completed(task, actor):
             f"{actor.get_full_name() or actor.username} on "
             f"{timezone.localtime():%d %b %Y, %I:%M %p}{took}{assigned}."
             + (f"\nNote: {task.completion_note[:200]}" if task.completion_note else ""))
+    when = f"{timezone.localtime():%d %b %Y, %I:%M %p}"
     targets = {task.created_by, task.assigned_to}
     targets.update(task.subscribers.all())
     for target in targets:
         if target and target.is_active and target.pk != actor.pk:
             notify(target, "task_completed",
-                   f"✅ Completed: {task.title}"[:200], body, link="/tasks")
+                   f"✅ Completed: {task.title}"[:200], body, link="/tasks",
+                   wa_template=("task_completed_alert", [
+                       target.get_full_name() or target.username,
+                       f"{task.code} · {task.title}",
+                       actor.get_full_name() or actor.username,
+                       when + (took or "") + (assigned or ""),
+                       task.completion_note or "—",
+                   ]))
 
 
 def _advance_due(due, frequency):
@@ -209,7 +217,18 @@ class TaskViewSet(viewsets.ModelViewSet):
         if p.get("status"):
             qs = qs.filter(status__in=p["status"].split(","))
         if p.get("assigned_to"):
-            qs = qs.filter(assigned_to_id=p["assigned_to"])
+            # "All Tasks" filters by one person or several at once
+            ids = [i for i in p["assigned_to"].split(",") if i.strip().isdigit()]
+            qs = qs.filter(assigned_to_id__in=ids) if ids else qs.none()
+        if p.get("department"):
+            qs = qs.filter(assigned_to__department__in=p["department"].split(","))
+        if p.get("manager"):
+            # everyone reporting to this manager (their team's tasks in one go)
+            qs = qs.filter(assigned_to__reporting_manager_id=p["manager"])
+        if p.get("created_by"):
+            qs = qs.filter(created_by_id=p["created_by"])
+        if p.get("priority"):
+            qs = qs.filter(priority__in=p["priority"].split(","))
         if p.get("lead"):
             qs = qs.filter(lead_id=p["lead"])
         if p.get("group"):
@@ -223,7 +242,17 @@ class TaskViewSet(viewsets.ModelViewSet):
         if p.get("overdue") == "true":
             qs = qs.exclude(status=TaskStatus.DONE).filter(due_at__lt=timezone.now())
         if p.get("search"):
-            qs = qs.filter(title__icontains=p["search"])
+            from django.db.models import Q as _Q
+            term = p["search"].strip()
+            clause = (_Q(title__icontains=term) | _Q(description__icontains=term)
+                      | _Q(assigned_to__first_name__icontains=term)
+                      | _Q(assigned_to__last_name__icontains=term)
+                      | _Q(assigned_to__username__icontains=term))
+            # "code" is a property (T-00042), so match its digits against the pk
+            digits = term.lstrip("Tt-").lstrip("0")
+            if digits.isdigit():
+                clause |= _Q(pk=int(digits))
+            qs = qs.filter(clause)
         return qs
 
     def _resolve_category(self, user, department, name):
@@ -701,15 +730,45 @@ class TaskViewSet(viewsets.ModelViewSet):
             return start, end
         return _range_bounds(rng, now)
 
-    def _report_users(self, user):
+    def _report_users(self, user, only_id=None):
+        """People this viewer may see task data for: admin -> everyone,
+        manager -> their department plus their direct reports, everyone else
+        -> just themselves. ?user= narrows to one of them (403 otherwise)."""
         if has_capability(user, "tasks.view_all"):
-            return list(User.objects.filter(is_active=True))
-        if has_capability(user, "tasks.view_department"):
+            users = list(User.objects.filter(is_active=True))
+        elif has_capability(user, "tasks.view_department"):
             from django.db.models import Q as _Q
-            return list(User.objects.filter(is_active=True).filter(
+            users = list(User.objects.filter(is_active=True).filter(
                 _Q(department=user.department) | _Q(reporting_manager=user)
                 | _Q(pk=user.pk)).distinct())
-        return [user]
+        else:
+            users = [user]
+        if only_id:
+            try:
+                only_id = int(only_id)
+            except (TypeError, ValueError):
+                raise ValidationError({"user": "Pass a user id."})
+            users = [u for u in users if u.pk == only_id]
+            if not users:
+                raise PermissionDenied("You cannot view this person's tasks.")
+        return users
+
+    @action(detail=False, methods=["get"])
+    def people(self, request):
+        """Who the "All Tasks" / Activities person-filter may list — the same
+        set of people this viewer can already see tasks for."""
+        users = sorted(self._report_users(request.user),
+                       key=lambda u: (u.first_name or u.username).lower())
+        return Response([{
+            "id": u.pk,
+            "name": u.get_full_name() or u.username,
+            "username": u.username,
+            "role": u.role,
+            "role_display": u.get_role_display(),
+            "department": u.department,
+            "department_display": u.get_department_display(),
+            "reports_to": u.reporting_manager_id,
+        } for u in users])
 
     @action(detail=False, methods=["get"])
     def employees_report(self, request):
@@ -719,7 +778,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         now = timezone.now()
         p = request.query_params
         start, end = self._report_bounds(p, now)
-        users = self._report_users(request.user)
+        users = self._report_users(request.user, only_id=p.get("user"))
         today = timezone.localtime(now).date()
 
         raw = Task.objects.filter(assigned_to__in=users, deleted_at__isnull=True) \
@@ -751,9 +810,19 @@ class TaskViewSet(viewsets.ModelViewSet):
             return Response({"rows": sorted(days.values(), key=lambda r: r["date"], reverse=True)})
 
         name_of = {u.pk: (u.get_full_name() or u.username) for u in users}
+        single = bool(p.get("user"))   # one person's profile: always emit a row
         rows = []
         for uid, sub in per.items():
             if not sub:
+                if single:
+                    rows.append({"user": uid, "name": name_of[uid], "total": 0,
+                                 "overdue": 0, "pending": 0, "in_progress": 0,
+                                 "completed": 0, "in_time": 0, "delayed": 0,
+                                 "time_assigned_minutes": 0, "time_earned_minutes": 0,
+                                 "time_spent_minutes": 0, "on_time_rate": None,
+                                 "effort_ratio": None, "score": None,
+                                 "multitask_days": 0, "multitask_on_time": None,
+                                 "review": "No tasks in this range."})
                 continue
             c = Counter()
             assigned = earned = spent = 0
@@ -1272,13 +1341,33 @@ class TaskActivityViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = TaskActivitySerializer
 
     def get_queryset(self):
-        qs = TaskActivity.objects.select_related("actor", "task").filter(
+        qs = TaskActivity.objects.select_related("actor", "task", "task__assigned_to").filter(
             task__in=visible_tasks(self.request.user))
         p = self.request.query_params
         if p.get("actor"):
             qs = qs.filter(actor_id=p["actor"])
+        if p.get("assigned_to"):
+            # whose TASK the activity belongs to (vs. who performed it)
+            qs = qs.filter(task__assigned_to_id=p["assigned_to"])
+        if p.get("department"):
+            qs = qs.filter(task__assigned_to__department=p["department"])
+        if p.get("task"):
+            qs = qs.filter(task_id=p["task"])
+        if p.get("kind"):
+            qs = qs.filter(kind=p["kind"])
+        if p.get("search"):
+            from django.db.models import Q as _Q
+            term = p["search"].strip()
+            clause = _Q(text__icontains=term) | _Q(task__title__icontains=term)
+            digits = term.lstrip("Tt-").lstrip("0")   # T-00042 -> task pk
+            if digits.isdigit():
+                clause |= _Q(task_id=int(digits))
+            qs = qs.filter(clause)
         if p.get("days"):
-            qs = qs.filter(created_at__gte=timezone.now() - timedelta(days=int(p["days"])))
+            try:
+                qs = qs.filter(created_at__gte=timezone.now() - timedelta(days=int(p["days"])))
+            except ValueError:
+                pass
         return qs
 
 

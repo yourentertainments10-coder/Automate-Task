@@ -6,6 +6,7 @@ import { Bar } from 'react-chartjs-2'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
 import Directory from './Directory'
+import PersonProfile from './PersonProfile'
 import TaskDetailPanel from './TaskDetail'
 import { ChangeRequests, CompleteModal, DeletedTasks, ProgressModal, RequestChangeModal, WorkloadPanel } from './TaskExtras'
 
@@ -65,7 +66,11 @@ export default function Tasks() {
   const useTemplate = (tpl) => { setPrefill(tpl); setArea('my') }
 
   const tabs = [
-    ['dashboard', 'Dashboard'], ['my', 'My Tasks'], ['delegated', 'Delegated'],
+    ['dashboard', 'Dashboard'], ['my', 'My Tasks'],
+    // All Tasks: everyone the viewer may see — admin the company, a manager
+    // their department plus direct reports. Filter by person or department.
+    ...(isManager ? [['all', 'All Tasks']] : []),
+    ['delegated', 'Delegated'],
     ['subscribed', 'Subscribed'],
     ['requests', inboxCount > 0 ? `Requests (${inboxCount})` : 'Requests'],
     ['templates', 'Templates'], ['directory', 'Template Directory'],
@@ -85,7 +90,7 @@ export default function Tasks() {
       {area === 'dashboard' && (
         <TaskDashboard onTileClick={(preset) => { setListPreset(preset); setArea(preset.area) }} />
       )}
-      {['my', 'delegated', 'subscribed'].includes(area) && (
+      {['my', 'all', 'delegated', 'subscribed'].includes(area) && (
         <TaskList scope={area} key={area} prefill={prefill}
           clearPrefill={() => setPrefill(null)} preset={listPreset}
           clearPreset={() => setListPreset(null)}
@@ -293,6 +298,17 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
     }
   }, [preset])  // eslint-disable-line react-hooks/exhaustive-deps
   const [onlyRecurring, setOnlyRecurring] = useState(false)
+  // "All Tasks" only: who / which department / free-text search
+  const [people, setPeople] = useState([])
+  const [fPerson, setFPerson] = useState('')
+  const [fDept, setFDept] = useState('')
+  const [search, setSearch] = useState('')
+  const [debounced, setDebounced] = useState('')
+  const [profileFor, setProfileFor] = useState(null)
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(search.trim()), 300)
+    return () => clearTimeout(id)
+  }, [search])
   const [showAdd, setShowAdd] = useState(!!prefill)
   const [completing, setCompleting] = useState(null)   // task in the evidence modal
   const [progressFor, setProgressFor] = useState(null) // task in the status-update modal (P1)
@@ -304,14 +320,31 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
     if (tab) p.set('status', tab)
     if (onlyOverdue) p.set('overdue', 'true')
     if (onlyRecurring) p.set('recurring', 'true')
+    if (scope === 'all') {
+      if (fPerson) p.set('assigned_to', fPerson)
+      if (fDept) p.set('department', fDept)
+      if (debounced) p.set('search', debounced)
+    }
     api(`/api/tasks/?${p}`).then(d => setRows(d.results || d)).catch(e => setErr(e.message))
-  }, [scope, tab, onlyOverdue, onlyRecurring])
+  }, [scope, tab, onlyOverdue, onlyRecurring, fPerson, fDept, debounced])
   useEffect(() => { load() }, [load])
   useEffect(() => {
     api('/api/tasks/assignees/').then(setTeam).catch(() => {})
     api('/api/groups/?active=true').then(setGroups).catch(() => {})
     api('/api/task-settings/').then(setSettings).catch(() => {})
   }, [])
+  useEffect(() => {
+    if (scope === 'all') api('/api/tasks/people/').then(setPeople).catch(() => {})
+  }, [scope])
+
+  // department dropdown lists only departments that actually have people
+  const deptOptions = useMemo(() => {
+    const seen = new Map()
+    people.forEach(p => { if (p.department) seen.set(p.department, p.department_display) })
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [people])
+  const shownPeople = useMemo(
+    () => (fDept ? people.filter(p => p.department === fDept) : people), [people, fDept])
 
   const needsEvidence = settings.require_completion_remarks || settings.require_completion_attachment
 
@@ -349,9 +382,19 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
 
   const empty = {
     my: 'No tasks assigned to you here.',
+    all: 'No tasks match these filters.',
     delegated: 'No tasks you delegated to others here.',
     subscribed: 'You are not following any tasks. Use the 🔔 on a task to follow it.',
   }[scope]
+
+  // headline counts for the filtered set — "kitne pending, kitne overdue"
+  const counts = useMemo(() => ({
+    total: rows.length,
+    overdue: rows.filter(t => t.is_overdue && t.status !== 'done').length,
+    pending: rows.filter(t => t.status === 'open').length,
+    in_progress: rows.filter(t => t.status === 'in_progress').length,
+    done: rows.filter(t => t.status === 'done').length,
+  }), [rows])
 
   return (
     <div>
@@ -374,6 +417,48 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
         <span style={{ flex: 1 }} />
         <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Task</button>
       </div>
+
+      {scope === 'all' && (
+        <div className="filters">
+          <select value={fDept} onChange={e => {
+            setFDept(e.target.value)
+            setFPerson('')          // person list narrows to the new department
+          }}>
+            <option value="">All departments</option>
+            {deptOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <select value={fPerson} onChange={e => setFPerson(e.target.value)}>
+            <option value="">
+              {fDept ? 'Everyone in this department' : 'All people'}
+            </option>
+            {shownPeople.map(p => (
+              <option key={p.id} value={p.id}>{p.name} — {p.role_display}</option>
+            ))}
+          </select>
+          <input type="search" placeholder="Search task, code or person…"
+            value={search} onChange={e => setSearch(e.target.value)} />
+          {(fPerson || fDept || search) && (
+            <button className="btn btn-sm" onClick={() => {
+              setFPerson(''); setFDept(''); setSearch('')
+            }}>Clear</button>
+          )}
+          {fPerson && (
+            <button className="btn btn-sm" title="Open this person's full profile"
+              onClick={() => setProfileFor({
+                id: Number(fPerson),
+                name: people.find(p => String(p.id) === String(fPerson))?.name || '',
+              })}>👤 Profile</button>
+          )}
+        </div>
+      )}
+
+      {scope === 'all' && rows.length > 0 && (
+        <p className="muted small">
+          <strong>{counts.total}</strong> tasks · {counts.pending} pending ·{' '}
+          {counts.in_progress} in progress · {counts.done} completed ·{' '}
+          <span className={counts.overdue ? 'late' : ''}>{counts.overdue} overdue</span>
+        </p>
+      )}
 
       {err && <div className="err">{err}</div>}
       {rows.length === 0 && <p className="muted">{empty}</p>}
@@ -421,7 +506,13 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
               {t.description && <div className="small muted">{t.description}</div>}
               {t.completion_note && <div className="small muted">📝 {t.completion_note}</div>}
               <div className="when">
-                {t.assigned_to_detail?.name}
+                {scope === 'all' && t.assigned_to_detail ? (
+                  <button className="link-name" title="Open this person's full profile"
+                    onClick={e => {
+                      e.stopPropagation()
+                      setProfileFor({ id: t.assigned_to, name: t.assigned_to_detail.name })
+                    }}>{t.assigned_to_detail.name}</button>
+                ) : t.assigned_to_detail?.name}
                 {scope !== 'my' && t.created_by_detail && <> · by {t.created_by_detail.name}</>}
                 {t.lead_name && <> · lead: <strong>{t.lead_name}</strong></>}
                 {t.due_at && t.status !== 'done' && (
@@ -475,6 +566,10 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
       {detailFor && (
         <TaskDetailPanel taskId={detailFor.id} user={user} team={team} settings={settings}
           onClose={() => setDetailFor(null)} onChanged={load} />
+      )}
+      {profileFor && (
+        <PersonProfile userId={profileFor.id} name={profileFor.name}
+          onClose={() => setProfileFor(null)} />
       )}
       {requestFor && (
         <RequestChangeModal task={requestFor} team={team} user={user}
@@ -903,15 +998,32 @@ function TemplateModal({ onClose, onSaved }) {
 /* ================= Activities ================= */
 
 function Activities() {
+  const { user } = useAuth()
   const [rows, setRows] = useState([])
+  const [people, setPeople] = useState([])
   const [days, setDays] = useState('7')
+  const [who, setWho] = useState('')         // whose TASK the activity is on
+  const [actor, setActor] = useState('')     // who performed it
+  const [search, setSearch] = useState('')
+  const [debounced, setDebounced] = useState('')
+  const [detailFor, setDetailFor] = useState(null)   // click a row -> open the task
   const [err, setErr] = useState('')
 
   useEffect(() => {
+    const id = setTimeout(() => setDebounced(search.trim()), 300)
+    return () => clearTimeout(id)
+  }, [search])
+  useEffect(() => { api('/api/tasks/people/').then(setPeople).catch(() => {}) }, [])
+
+  const load = useCallback(() => {
     const p = new URLSearchParams({ page_size: '100' })
     if (days) p.set('days', days)
+    if (who) p.set('assigned_to', who)
+    if (actor) p.set('actor', actor)
+    if (debounced) p.set('search', debounced)
     api(`/api/task-activities/?${p}`).then(d => setRows(d.results || d)).catch(e => setErr(e.message))
-  }, [days])
+  }, [days, who, actor, debounced])
+  useEffect(() => { load() }, [load])
 
   return (
     <div>
@@ -921,20 +1033,44 @@ function Activities() {
             <button key={l} className={'seg-btn' + (days === v ? ' on' : '')} onClick={() => setDays(v)}>{l}</button>
           ))}
         </div>
+        <select value={who} onChange={e => setWho(e.target.value)}>
+          <option value="">Whose task — anyone</option>
+          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={actor} onChange={e => setActor(e.target.value)}>
+          <option value="">Done by — anyone</option>
+          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <input type="search" placeholder="Search activity or task…"
+          value={search} onChange={e => setSearch(e.target.value)} />
+        {(who || actor || search) && (
+          <button className="btn btn-sm"
+            onClick={() => { setWho(''); setActor(''); setSearch('') }}>Clear</button>
+        )}
       </div>
       {err && <div className="err">{err}</div>}
       {rows.length === 0 && <p className="muted">No task activity in this window.</p>}
       <div className="dash-card" style={{ maxWidth: 720 }}>
         {rows.map(a => (
-          <div className="feed-row" key={a.id}>
+          <div className="feed-row" key={a.id} style={{ cursor: a.task ? 'pointer' : 'default' }}
+            title={a.task ? 'Open this task' : ''}
+            onClick={() => a.task && setDetailFor(a.task)}>
             <span className="dot" style={{ marginTop: 6 }} />
             <div>
+              {a.task_code && <span className="t-code">{a.task_code}</span>}{' '}
               <strong>{a.task_title}</strong> <span className="small muted">{a.text}</span>
-              <div className="when">{a.actor?.name || 'System'} · {fmtDT(a.created_at)}</div>
+              <div className="when">
+                {a.actor?.name || 'System'} · {fmtDT(a.created_at)}
+                {a.task_assignee && <> · task of {a.task_assignee}</>}
+              </div>
             </div>
           </div>
         ))}
       </div>
+      {detailFor && (
+        <TaskDetailPanel taskId={detailFor} user={user} team={[]} settings={{}}
+          onClose={() => setDetailFor(null)} onChanged={load} />
+      )}
     </div>
   )
 }
@@ -1128,51 +1264,10 @@ function EmployeesReport() {
           </tbody>
         </table>
       )}
-      {person && <PersonSlideOver r={person} formula={data.formula} onClose={() => setPerson(null)} />}
-    </div>
-  )
-}
-
-/* D3: per-person drill-down — stats + their open tasks + attendance link */
-function PersonSlideOver({ r, formula, onClose }) {
-  const [tasks, setTasks] = useState(null)
-  useEffect(() => {
-    api(`/api/tasks/?assigned_to=${r.user}&page_size=30&status=open,in_progress`)
-      .then(d => setTasks(d.results || d)).catch(() => setTasks([]))
-  }, [r.user])
-  return (
-    <div className="modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal-card" style={{ width: 560 }}>
-        <h2>{r.name}</h2>
-        <div className="stats" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          <div className="stat"><div className="label">Score</div><div className="value" title={formula}>{r.score ?? '—'}</div></div>
-          <div className="stat"><div className="label">Time Earned</div><div className="value">{fmtEffort(r.time_earned_minutes) || '0m'}</div></div>
-          <div className="stat"><div className="label">Time Spent</div><div className="value">{fmtEffort(r.time_spent_minutes) || '0m'}</div></div>
-          <div className="stat"><div className="label">On-time</div><div className="value">{r.on_time_rate ?? '—'}%</div></div>
-          <div className="stat"><div className="label">Overdue now</div><div className="value">{r.overdue}</div></div>
-          <div className="stat"><div className="label">Multitask days</div><div className="value">{r.multitask_days}</div></div>
-        </div>
-        <h3 style={{ margin: '12px 0 6px' }}>Open tasks</h3>
-        {!tasks && <p className="muted small">Loading…</p>}
-        {tasks?.length === 0 && <p className="muted small">Nothing open right now.</p>}
-        {tasks?.length > 0 && (
-          <div className="task-list" style={{ maxHeight: 220, overflowY: 'auto' }}>
-            {tasks.map(t => (
-              <div key={t.id} className="task-row">
-                <div className="task-main">
-                  <div className="task-title"><span className="t-code">{t.code}</span>{t.title}</div>
-                  <div className="when">{t.due_at ? relDue(t.due_at) : 'no due date'}
-                    {t.effort_minutes && <> · ⏱ {fmtEffort(t.effort_minutes)}</>}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="modal-actions">
-          <a className="btn" href="/hr">Attendance page →</a>
-          <button className="btn btn-primary" onClick={onClose}>Close</button>
-        </div>
-      </div>
+      {person && (
+        <PersonProfile userId={person.user} name={person.name}
+          onClose={() => setPerson(null)} />
+      )}
     </div>
   )
 }
