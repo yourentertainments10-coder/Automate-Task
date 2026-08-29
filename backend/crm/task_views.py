@@ -1,6 +1,7 @@
 from collections import Counter
 from datetime import timedelta
 
+from django.db.models import F, Q
 from django.utils import timezone
 from rest_framework import status as http, viewsets
 from rest_framework.decorators import action
@@ -40,12 +41,21 @@ def _admins():
 
 
 def _approvers_for(req: TaskChangeRequest):
-    """B2 routing: assignee's request -> the creator; creator's own request ->
-    the admins. (Admin can review anything either way.)"""
+    """Who decides a Modification Request. The rule is "one step up from
+    the person asking", never a broadcast to every admin:
+
+      assignee asks           -> the person who GAVE them the task
+      creator asks (own task) -> that person's reporting manager
+      nobody on file          -> admins, as a last resort only
+
+    An approver who would rather not decide can still Escalate to admin."""
     task = req.task
     if req.requested_by_id != task.created_by_id and task.created_by \
             and task.created_by.is_active:
         return [task.created_by]
+    manager = req.requested_by.reporting_manager
+    if manager and manager.is_active and manager.pk != req.requested_by_id:
+        return [manager]
     return list(_admins().exclude(pk=req.requested_by_id))
 
 
@@ -60,10 +70,14 @@ def _change_request_body(req: TaskChangeRequest, approver) -> str:
         return (u.get_full_name() or u.username) if u else "-"
 
     if approver.id == task.created_by_id:
-        because = "This is yours to decide because you created this task."
+        because = "This is yours to decide because you gave out this task."
+    elif approver.id == getattr(req.requested_by, "reporting_manager_id", None):
+        because = ("This is yours to decide because "
+                   f"{who(req.requested_by)} reports to you and this is their own task.")
     elif has_capability(approver, "tasks.view_all"):
-        because = ("This reached you as an admin because the task's own "
-                   "creator raised the request.")
+        because = ("This reached you as an admin because there is no reporting "
+                   f"manager on file for {who(req.requested_by)} - set one in "
+                   "My Team so these stop coming to admins.")
     else:
         because = "You have been asked to review this request."
     lines = [
@@ -81,14 +95,14 @@ def _change_request_body(req: TaskChangeRequest, approver) -> str:
 
 
 def can_review_request(user, req: TaskChangeRequest) -> bool:
+    """Derived from _approvers_for, so routing and permission never drift."""
     if req.requested_by_id == user.id:
         return False                       # never your own request
-    if has_capability(user, "tasks.view_all"):
-        return True                        # admin reviews anything
-    if req.escalated:
-        return False                       # once escalated, only admin decides
-    return (req.requested_by_id != req.task.created_by_id
-            and req.task.created_by_id == user.id)
+    if req.escalated:                      # escalated: only admin decides
+        return has_capability(user, "tasks.view_all")
+    if any(a.pk == user.pk for a in _approvers_for(req)):
+        return True
+    return has_capability(user, "tasks.view_all")   # admin backstop
 
 
 def _notify_task_assigned(task, actor):
@@ -318,9 +332,15 @@ class TaskViewSet(viewsets.ModelViewSet):
                 "not to someone senior to you.")
         # B6: effort is mandatory when creating a task by hand -- scoring
         # depends on it (system-created tasks from forms/templates are exempt).
+        missing = {}
         if not serializer.validated_data.get("effort_minutes"):
-            raise ValidationError({
-                "effort_minutes": "Effort is required — how long should this task take?"})
+            missing["effort_minutes"] = "Effort is required — how long should this task take?"
+        # No due date means no reminder, no overdue flag and no on-time score,
+        # so the task quietly falls out of every report. Make it mandatory.
+        if not serializer.validated_data.get("due_at"):
+            missing["due_at"] = "Due date is required — reminders and on-time scoring need it."
+        if missing:
+            raise ValidationError(missing)
         serializer.validated_data["category"] = self._resolve_category(
             user,
             serializer.validated_data.get("department", ""),
@@ -1212,15 +1232,22 @@ class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
         elif scope == "all":
             if not has_capability(user, "tasks.view_all"):
                 raise PermissionDenied("Only an admin can see all change requests.")
-        else:  # inbox
+        else:  # inbox — only what THIS person is actually meant to decide
+            creator_raised = Q(requested_by=F("task__created_by"))
+            # a task I gave out, someone else is asking to change it
+            i_gave_it = Q(task__created_by=user)
+            # my own report asking to change a task they created themselves
+            from_my_report = Q(requested_by__reporting_manager=user) & creator_raised
             if has_capability(user, "tasks.view_all"):
-                qs = qs.exclude(requested_by=user)
+                # admins are the LAST resort, not the default inbox: only
+                # escalations and people with no manager on file land here
+                no_manager = (Q(requested_by__reporting_manager__isnull=True)
+                              | Q(requested_by__reporting_manager__is_active=False))
+                qs = qs.filter(i_gave_it | from_my_report | Q(escalated=True)
+                               | (creator_raised & no_manager))
             else:
-                # requests on tasks I created, raised by the assignee --
-                # minus the ones I've already escalated to admin
-                qs = (qs.filter(task__created_by=user)
-                        .exclude(requested_by=user).filter(escalated=False))
-            qs = qs.filter(status=ChangeRequestStatus.PENDING)
+                qs = qs.filter(i_gave_it | from_my_report).filter(escalated=False)
+            qs = qs.exclude(requested_by=user).filter(status=ChangeRequestStatus.PENDING)
         if self.request.query_params.get("status"):
             qs = qs.filter(status=self.request.query_params["status"])
         return qs

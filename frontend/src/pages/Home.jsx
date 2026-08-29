@@ -6,6 +6,7 @@ import { Bar } from 'react-chartjs-2'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { fmtINR } from './Leads'
+import { relDue } from './Tasks'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
@@ -14,38 +15,107 @@ const fmtDT = (iso) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', m
 
 export default function Home() {
   const { user, can } = useAuth()
-  if (!can('dashboard.view')) return <Welcome user={user} />
-  return <Dashboard user={user} />
+  // The pipeline half of this page only means something to people who
+  // actually work leads. Warehouse/IT/Accounts have dashboard rights but no
+  // pipeline, so showing them "Total Leads 0 / Conversion 0%" was noise.
+  const worksLeads = can('leads.view_all') || can('leads.view_department')
+    || can('leads.view_own')
+  return <Dashboard user={user} showLeads={worksLeads && can('dashboard.view')} />
 }
 
-function Welcome({ user }) {
+/* Everyone has tasks, whatever their role — this is the part of the
+   dashboard that is never empty for anybody. */
+function MyWork({ user, can }) {
+  const [tiles, setTiles] = useState(null)
+  const [next, setNext] = useState(null)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    api('/api/tasks/dashboard/?scope=my&range=all')
+      .then(d => setTiles(d.tiles)).catch(e => setErr(e.message))
+    api('/api/tasks/?scope=my&status=open,in_progress&page_size=6')
+      .then(d => setNext(d.results || d)).catch(() => setNext([]))
+  }, [])
+
+  const isManager = can('tasks.view_all') || can('tasks.view_department')
   return (
-    <div>
-      <h1>Welcome, {user.first_name || user.username}</h1>
-      <p className="muted">
-        Signed in as <strong>{user.role_display}</strong> · {user.department_display} department.
-      </p>
-      <div className="placeholder-card">
-        <h3>Your workspace</h3>
-        <p>Use <strong>Leads</strong> to work your pipeline and <strong>Notifications</strong> for
-          assignments and follow-up reminders. Your role's permissions:</p>
-        <div className="cap-list">
-          {user.capabilities.map(c => <code key={c}>{c}</code>)}
+    <>
+      <div className="stats">
+        <Tile label="My open tasks" value={tiles ? tiles.pending + tiles.in_progress : '—'} />
+        <Tile label="Overdue" value={tiles ? tiles.overdue : '—'} alert={tiles?.overdue > 0} />
+        <Tile label="In progress" value={tiles ? tiles.in_progress : '—'} />
+        <Tile label="Completed" value={tiles ? tiles.completed : '—'} />
+        <Tile label="Finished on time" value={tiles ? tiles.in_time : '—'} />
+        <Tile label="Delayed" value={tiles ? tiles.delayed : '—'} alert={tiles?.delayed > 0} />
+      </div>
+      {err && <div className="err">{err}</div>}
+
+      <div className="dash-grid">
+        <div className="dash-card">
+          <h3>What's next for you</h3>
+          {!next && <p className="muted small">Loading…</p>}
+          {next?.length === 0 && <p className="muted small">Nothing open — you're clear. 🎉</p>}
+          {next?.map(t => (
+            <div className="feed-row" key={t.id}>
+              <span className="dot" style={{ marginTop: 6 }} />
+              <div>
+                <span className="t-code">{t.code}</span> <strong>{t.title}</strong>
+                <div className="when">
+                  {t.status_display}
+                  {t.created_by_detail && <> · by {t.created_by_detail.name}</>}
+                  {t.due_at && (
+                    <span className={t.is_overdue ? ' late' : ''}> · {relDue(t.due_at)}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          <a className="btn btn-sm" href="/tasks" style={{ marginTop: 10 }}>Open Tasks →</a>
+        </div>
+
+        <div className="dash-card">
+          <h3>Where to go</h3>
+          <p className="muted small">Your role: <strong>{user.role_display}</strong> · {user.department_display}</p>
+          <ul className="dir-steps">
+            <li><strong>Tasks</strong> — your work, and what you have delegated.</li>
+            {isManager && <li><strong>Tasks → All Tasks</strong> — your team's workload, filtered by person.</li>}
+            {isManager && <li><strong>Tasks → Requests</strong> — changes waiting for your approval.</li>}
+            <li><strong>Attendance</strong> — mark yourself present and apply for leave.</li>
+            <li><strong>Mistakes</strong> — log and close accountability items.</li>
+            <li><strong>Notifications</strong> — everything that pinged you.</li>
+          </ul>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
-function Dashboard({ user }) {
+function Dashboard({ user, showLeads }) {
+  const { can } = useAuth()
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
 
   useEffect(() => {
+    if (!showLeads) return          // no pipeline for this role: skip the call
     api('/api/dashboard/').then(setData).catch(e => setErr(e.message))
-  }, [])
+  }, [showLeads])
 
-  if (err) return <div className="err">{err}</div>
+  const head = (
+    <div className="page-head">
+      <h1>Dashboard</h1>
+      <span className="muted small">
+        {user.role === 'admin' ? 'All departments' : `${user.department_display} department`}
+      </span>
+    </div>
+  )
+
+  // Task-only roles (warehouse, accounts, IT, developers…) stop here — their
+  // dashboard is their work, not a sales pipeline.
+  if (!showLeads) {
+    return <div>{head}<MyWork user={user} can={can} /></div>
+  }
+
+  if (err) return <div>{head}<div className="err">{err}</div><MyWork user={user} can={can} /></div>
   if (!data) return <div className="center-note">Loading dashboard…</div>
 
   const { tiles, status_dist, per_day, employees, sources, recent_inbound, recent_events } = data
@@ -53,12 +123,7 @@ function Dashboard({ user }) {
 
   return (
     <div>
-      <div className="page-head">
-        <h1>Dashboard</h1>
-        <span className="muted small">
-          {user.role === 'admin' ? 'All departments' : `${user.department_display} department`}
-        </span>
-      </div>
+      {head}
 
       <div className="stats">
         <Tile label="Total Leads" value={tiles.total} />

@@ -2,7 +2,7 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import User
+from .models import User, Role
 from .permissions import capabilities_for
 
 
@@ -61,9 +61,43 @@ class UserWriteSerializer(serializers.ModelSerializer):
             validate_password(value)
         return value
 
+    def _current(self, attrs, field):
+        """Value after this save: what was sent, else what is already stored."""
+        if field in attrs:
+            return attrs[field]
+        return getattr(self.instance, field, None) if self.instance else None
+
     def validate(self, attrs):
+        """Every field the system actually depends on is mandatory. A blank
+        one does not fail loudly -- it silently drops a notification or sends
+        an approval to the wrong person -- so it is rejected at the source."""
+        errors = {}
         if self.instance is None and not attrs.get("password"):
-            raise serializers.ValidationError({"password": "Password is required for new users."})
+            errors["password"] = "Password is required for new users."
+
+        if not str(self._current(attrs, "email") or "").strip():
+            errors["email"] = "Email is required — task and approval mails are sent here."
+
+        phone = "".join(ch for ch in str(self._current(attrs, "whatsapp_phone") or "")
+                        if ch.isdigit())
+        if not phone:
+            errors["whatsapp_phone"] = (
+                "WhatsApp number is required — without it this person gets no "
+                "WhatsApp alerts.")
+        elif len(phone) not in (10, 12):
+            errors["whatsapp_phone"] = (
+                "Enter a 10-digit mobile number (or 12 digits with the 91 country code).")
+
+        role = self._current(attrs, "role")
+        manager = self._current(attrs, "reporting_manager")
+        if role != Role.ADMIN and not manager:
+            errors["reporting_manager"] = (
+                "Reports to is required — change requests go one step up to "
+                "this person. Without it they fall back to the admins.")
+        if manager and self.instance and manager.pk == self.instance.pk:
+            errors["reporting_manager"] = "Somebody cannot report to themselves."
+        if errors:
+            raise serializers.ValidationError(errors)
         return attrs
 
     def create(self, validated_data):

@@ -235,6 +235,16 @@ class TaskChangeRequestSerializer(serializers.ModelSerializer):
     def get_changes_display(self, obj):
         return obj.describe()
 
+    def validate_reason(self, value):
+        """The approver decides on the strength of this sentence alone, so a
+        two-word "pls change" is not enough to act on."""
+        text = (value or "").strip()
+        if len(text) < 15:
+            raise serializers.ValidationError(
+                "Explain why in at least a full sentence — the approver only "
+                "sees this and has to decide from it.")
+        return text
+
     def validate_changes(self, value):
         if not isinstance(value, dict) or not value:
             raise serializers.ValidationError("Propose at least one change.")

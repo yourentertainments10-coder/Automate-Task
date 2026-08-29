@@ -253,7 +253,10 @@ class ChangeRequestTests(Base):
         self.assertTrue(Notification.objects.filter(user=self.admin,
                                                     type="task_change_log").exists())
 
-    def test_creator_request_goes_to_admin_not_self(self):
+    def test_creator_request_falls_back_to_admin_without_a_manager(self):
+        """Last resort only: meera has no "Reports to" on file, so there is
+        nobody one step up and an admin has to decide."""
+        self.assertIsNone(self.manager.reporting_manager)
         res = self.raise_request(self.manager, {"frequency": "one_time"},
                                  "accidentally made it daily")
         self.assertEqual(res.status_code, 201)
@@ -270,6 +273,50 @@ class ChangeRequestTests(Base):
                                           {"decision": "approved"}, format="json").status_code, 200)
         self.task.refresh_from_db()
         self.assertEqual(self.task.frequency, "one_time")        # daily mistake stopped
+
+    def test_creator_request_goes_to_their_manager_not_admin(self):
+        """The reviewer's rule: one step up, never a broadcast to admins.
+        meera created the task herself, so her own reporting manager decides
+        and no admin is pulled in."""
+        boss = make("dept_head", Role.SALES_MANAGER)
+        self.manager.reporting_manager = boss
+        self.manager.save(update_fields=["reporting_manager"])
+
+        res = self.raise_request(self.manager, {"frequency": "one_time"},
+                                 "accidentally made it daily")
+        self.assertEqual(res.status_code, 201)
+        rid = res.data["id"]
+        self.assertTrue(Notification.objects.filter(
+            user=boss, type="task_change_request").exists())
+        self.assertFalse(Notification.objects.filter(
+            user=self.admin, type="task_change_request").exists())
+
+        # it sits in the manager's inbox, not in an admin's
+        self.as_(boss)
+        inbox = self.client.get("/api/task-change-requests/?scope=inbox").data
+        self.assertIn(rid, [r["id"] for r in inbox["results"]])
+        self.as_(self.admin)
+        inbox = self.client.get("/api/task-change-requests/?scope=inbox").data
+        self.assertNotIn(rid, [r["id"] for r in inbox["results"]])
+
+        self.as_(boss)
+        self.assertEqual(self.client.post(f"/api/task-change-requests/{rid}/review/",
+                                          {"decision": "approved"}, format="json").status_code, 200)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.frequency, "one_time")
+
+    def test_assignee_request_never_reaches_admin(self):
+        """The person who GAVE the task decides -- admins stay out of it."""
+        res = self.raise_request(self.rahul, {"priority": "high"}, "urgent now")
+        self.assertEqual(res.status_code, 201)
+        self.assertTrue(Notification.objects.filter(
+            user=self.manager, type="task_change_request").exists())
+        self.assertFalse(Notification.objects.filter(
+            user=self.admin, type="task_change_request").exists())
+        self.as_(self.admin)
+        ids = [r["id"] for r in
+               self.client.get("/api/task-change-requests/?scope=inbox").data["results"]]
+        self.assertNotIn(res.data["id"], ids)
 
     def test_rejection_changes_nothing(self):
         old_due = self.task.due_at

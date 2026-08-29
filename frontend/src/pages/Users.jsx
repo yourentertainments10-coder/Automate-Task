@@ -307,8 +307,9 @@ function UserModal({ initial, managers, onClose, onSaved }) {
             <input value={f.username} onChange={set('username')} disabled={!!initial} autoFocus={!initial} />
           </div>
           <div>
-            <label>Email</label>
-            <input type="email" value={f.email} onChange={set('email')} />
+            <label>Email *</label>
+            <input type="email" required value={f.email} onChange={set('email')} />
+            <div className="muted small">Task and approval mails go here.</div>
           </div>
           <div>
             <label>First name</label>
@@ -331,13 +332,16 @@ function UserModal({ initial, managers, onClose, onSaved }) {
             </select>
           </div>
           <div>
-            <label>WhatsApp / Mobile</label>
-            <input value={f.whatsapp_phone} onChange={set('whatsapp_phone')} placeholder="9198XXXXXXXX" />
+            <label>WhatsApp / Mobile *</label>
+            <input required value={f.whatsapp_phone} onChange={set('whatsapp_phone')}
+              placeholder="9876543210" />
+            <div className="muted small">No number means no WhatsApp alerts.</div>
           </div>
           <div>
-            <label>Reports to</label>
-            <select value={f.reporting_manager} onChange={set('reporting_manager')}>
-              <option value="">NA</option>
+            <label>Reports to {f.role !== 'admin' && '*'}</label>
+            <select required={f.role !== 'admin'} value={f.reporting_manager}
+              onChange={set('reporting_manager')}>
+              <option value="">{f.role === 'admin' ? 'NA' : 'Select a manager…'}</option>
               {managers.filter(m => !initial || m.id !== initial.id)
                 .map(m => <option key={m.id} value={m.id}>{m.first_name || m.username}</option>)}
             </select>
@@ -347,6 +351,12 @@ function UserModal({ initial, managers, onClose, onSaved }) {
             <input type="password" value={f.password} onChange={set('password')} autoComplete="new-password" />
           </div>
         </div>
+        {f.role !== 'admin' && (
+          <p className="muted small">
+            <strong>Reports to</strong> decides who approves this person's change
+            requests. Leave it blank and every request lands on the admins instead.
+          </p>
+        )}
         {err && <div className="err">{err}</div>}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>

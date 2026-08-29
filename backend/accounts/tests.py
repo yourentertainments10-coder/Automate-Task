@@ -71,6 +71,9 @@ class UserManagementTests(TestCase):
         self.client = APIClient()
         self.admin = make("boss", Role.ADMIN)
         self.exec_ = make("neha", Role.SALES_EXECUTIVE)
+        self.exec_.whatsapp_phone = "9876500000"
+        self.exec_.reporting_manager = self.admin
+        self.exec_.save(update_fields=["whatsapp_phone", "reporting_manager"])
 
     def as_(self, username):
         res = self.client.post("/api/auth/login", {"username": username, "password": "pass@12345"})
@@ -85,10 +88,50 @@ class UserManagementTests(TestCase):
         res = self.client.post("/api/users/", {
             "username": "sonal", "email": "sonal@x.com", "password": "sonal@12345",
             "role": "sales_manager", "department": "sales", "first_name": "Sonal",
+            "whatsapp_phone": "9876543210", "reporting_manager": self.admin.id,
         })
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.data["role"], "sales_manager")
         self.assertIn("leads.assign", User.objects.get(username="sonal").role and res.data["capabilities"])
+
+    def test_create_requires_contact_and_manager(self):
+        """A blank email/phone silently drops that person's notifications and
+        a blank "Reports to" sends their approvals to the admins, so all three
+        are mandatory."""
+        self.as_("boss")
+        res = self.client.post("/api/users/", {
+            "username": "gaps", "password": "sonal@12345",
+            "role": "warehouse", "department": "warehouse",
+        })
+        self.assertEqual(res.status_code, 400)
+        for field in ("email", "whatsapp_phone", "reporting_manager"):
+            self.assertIn(field, res.data)
+
+    def test_admin_needs_no_reporting_manager(self):
+        self.as_("boss")
+        res = self.client.post("/api/users/", {
+            "username": "boss2", "email": "boss2@x.com", "password": "sonal@12345",
+            "role": "admin", "department": "management",
+            "whatsapp_phone": "9876543211",
+        })
+        self.assertEqual(res.status_code, 201)
+
+    def test_phone_must_look_like_a_number(self):
+        self.as_("boss")
+        res = self.client.post("/api/users/", {
+            "username": "badphone", "email": "b@x.com", "password": "sonal@12345",
+            "role": "warehouse", "department": "warehouse",
+            "whatsapp_phone": "12345", "reporting_manager": self.admin.id,
+        })
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("whatsapp_phone", res.data)
+
+    def test_nobody_reports_to_themselves(self):
+        self.as_("boss")
+        res = self.client.patch(f"/api/users/{self.exec_.id}/",
+                                {"reporting_manager": self.exec_.id})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("reporting_manager", res.data)
 
     def test_create_requires_password(self):
         self.as_("boss")
