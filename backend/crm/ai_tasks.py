@@ -113,6 +113,10 @@ def review_sentence(r: dict) -> str:
     completed, on_time = r["completed"], r["on_time_rate"]
     if completed == 0:
         return "No completions in this period — check the pipeline before judging."
+    if on_time is None:
+        # everything they finished was self-assigned, so nothing is scored
+        return ("Only self-assigned work finished here — nothing to score. "
+                "Delegate them real tasks to judge performance.")
     if on_time is not None and on_time >= 90 and (r["score"] or 0) >= 85:
         return ("Next level — on time every time. Make them a trainer/lead; "
                 "consider promotion.")

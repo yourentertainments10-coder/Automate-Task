@@ -74,8 +74,21 @@ export default function PersonProfile({ userId, name, onClose }) {
               <div className="stat"><div className="label">In time</div><div className="value">{s.in_time}</div></div>
               <div className="stat"><div className="label">Delayed</div><div className={'value' + (s.delayed ? ' late' : '')}>{s.delayed}</div></div>
               <div className="stat"><div className="label">Time Earned</div><div className="value">{fmtEffort(s.time_earned_minutes) || '0m'}</div></div>
-              <div className="stat"><div className="label">Score</div><div className="value">{s.score ?? '—'}</div></div>
+              <div className="stat">
+                <div className="label">Score</div>
+                <div className="value" title="Only tasks assigned by someone else are scored">
+                  {s.score ?? '—'}
+                </div>
+              </div>
             </div>
+            {s.self_assigned > 0 && (
+              <p className="muted small">
+                {s.self_assigned} of these {s.self_assigned === 1 ? 'is' : 'are'} self-assigned —
+                they show in the counts but earn no points. The score comes from
+                the {s.scored_completed} task{s.scored_completed === 1 ? '' : 's'} someone
+                else assigned and this person finished.
+              </p>
+            )}
             {s.review && <p className="muted small">💡 {s.review}</p>}
           </>
         )}

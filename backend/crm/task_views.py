@@ -782,8 +782,8 @@ class TaskViewSet(viewsets.ModelViewSet):
         today = timezone.localtime(now).date()
 
         raw = Task.objects.filter(assigned_to__in=users, deleted_at__isnull=True) \
-            .values("assigned_to_id", "status", "due_at", "completed_at",
-                    "created_at", "effort_minutes", "actual_minutes")
+            .values("assigned_to_id", "created_by_id", "status", "due_at",
+                    "completed_at", "created_at", "effort_minutes", "actual_minutes")
         per = {u.pk: [] for u in users}
         for t in raw:
             anchor = timezone.localtime(t["due_at"] or t["created_at"]).date()
@@ -818,6 +818,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                     rows.append({"user": uid, "name": name_of[uid], "total": 0,
                                  "overdue": 0, "pending": 0, "in_progress": 0,
                                  "completed": 0, "in_time": 0, "delayed": 0,
+                                 "self_assigned": 0, "scored_completed": 0,
                                  "time_assigned_minutes": 0, "time_earned_minutes": 0,
                                  "time_spent_minutes": 0, "on_time_rate": None,
                                  "effort_ratio": None, "score": None,
@@ -826,8 +827,15 @@ class TaskViewSet(viewsets.ModelViewSet):
                 continue
             c = Counter()
             assigned = earned = spent = 0
+            # Scoring counts ONLY tasks somebody else handed you: a task you
+            # created for yourself earns no points, so nobody can inflate a
+            # score by self-assigning easy work.
+            sc_assigned = sc_earned = sc_completed = sc_in_time = 0
             intervals = []
             for t in sub:
+                own = t["created_by_id"] == uid          # self-assigned
+                if own:
+                    c["self_assigned"] += 1
                 if t["status"] != TaskStatus.DONE and t["due_at"] and t["due_at"] < now:
                     c["overdue"] += 1
                 if t["status"] == TaskStatus.OPEN:
@@ -840,7 +848,14 @@ class TaskViewSet(viewsets.ModelViewSet):
                     c["delayed" if late else "in_time"] += 1
                     earned += t["effort_minutes"] or 0
                     spent += t["actual_minutes"] or 0
+                    if not own:
+                        sc_completed += 1
+                        sc_earned += t["effort_minutes"] or 0
+                        if not late:
+                            sc_in_time += 1
                 assigned += t["effort_minutes"] or 0
+                if not own:
+                    sc_assigned += t["effort_minutes"] or 0
                 s = timezone.localtime(t["created_at"]).date()
                 e = timezone.localtime(t["completed_at"]).date() if t["completed_at"] else today
                 intervals.append((s, e, t))
@@ -871,9 +886,10 @@ class TaskViewSet(viewsets.ModelViewSet):
                     if not (t["due_at"] and t["completed_at"] > t["due_at"]):
                         mt_in_time += 1
 
-            completed = c.get("completed", 0)
-            on_time_rate = (c.get("in_time", 0) / completed) if completed else None
-            effort_ratio = min(1.0, earned / assigned) if assigned else None
+            # Rates behind the score use the delegated tasks only — someone
+            # with nothing but self-assigned work scores nothing at all.
+            on_time_rate = (sc_in_time / sc_completed) if sc_completed else None
+            effort_ratio = min(1.0, sc_earned / sc_assigned) if sc_assigned else None
             score = None
             if on_time_rate is not None and effort_ratio is not None:
                 score = round(self.SCORE_ON_TIME_WEIGHT * on_time_rate
@@ -884,7 +900,9 @@ class TaskViewSet(viewsets.ModelViewSet):
             row = {
                 "user": uid, "name": name_of[uid], "total": len(sub),
                 **{k: c.get(k, 0) for k in ("overdue", "pending", "in_progress",
-                                            "completed", "in_time", "delayed")},
+                                            "completed", "in_time", "delayed",
+                                            "self_assigned")},
+                "scored_completed": sc_completed,     # delegated + finished
                 "time_assigned_minutes": assigned,
                 "time_earned_minutes": earned,
                 "time_spent_minutes": spent,
@@ -915,7 +933,9 @@ class TaskViewSet(viewsets.ModelViewSet):
             "formula": f"Score = {self.SCORE_ON_TIME_WEIGHT} × on-time rate + "
                        f"{self.SCORE_EFFORT_WEIGHT} × (time earned ÷ time assigned) "
                        f"− mistake penalty (low 1 · medium 3 · high 6 · critical 10, "
-                       f"repeats ×2, max {MAX_EMPLOYEE_PENALTY})",
+                       f"repeats ×2, max {MAX_EMPLOYEE_PENALTY}). "
+                       f"Only tasks assigned BY SOMEONE ELSE are scored — a task "
+                       f"you create for yourself earns no points",
         })
 
     @action(detail=False, methods=["get"])

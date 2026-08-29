@@ -416,7 +416,10 @@ function TaskList({ scope, prefill, people = [], clearPrefill, preset, clearPres
           </button>
         )}
         <span style={{ flex: 1 }} />
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Task</button>
+        {/* All Tasks is a read-across view — create tasks from My Tasks */}
+        {scope !== 'all' && (
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Task</button>
+        )}
       </div>
 
       {scope === 'all' && (
@@ -1181,10 +1184,12 @@ function EmployeesReport() {
           r.time_earned_minutes, r.time_spent_minutes]))
     } else {
       downloadCSV(`employees-report-${range}.csv`,
-        ['Person', 'Score', 'Total', 'Overdue', 'Pending', 'In progress', 'Completed',
+        ['Person', 'Score', 'Total', 'Self-assigned (not scored)', 'Scored completions',
+          'Overdue', 'Pending', 'In progress', 'Completed',
           'In time', 'Delayed', 'Time assigned (min)', 'Time earned (min)',
           'Time spent (min)', 'Multitask days'],
-        data.rows.map(r => [r.name, r.score ?? '', r.total, r.overdue, r.pending,
+        data.rows.map(r => [r.name, r.score ?? '', r.total, r.self_assigned ?? 0,
+          r.scored_completed ?? 0, r.overdue, r.pending,
           r.in_progress, r.completed, r.in_time, r.delayed, r.time_assigned_minutes,
           r.time_earned_minutes, r.time_spent_minutes, r.multitask_days]))
     }
@@ -1246,6 +1251,12 @@ function EmployeesReport() {
                   <strong>{r.name}</strong>
                   {r.multitask_days >= 3 && (r.multitask_on_time ?? 0) >= 70 && (
                     <span className="ai-chip" title={`${r.multitask_days} days with 3+ parallel tasks, ${r.multitask_on_time}% of them finished on time`}>🤹 Multitasker</span>
+                  )}
+                  {r.self_assigned > 0 && (
+                    <span className="ai-chip"
+                      title={`${r.self_assigned} task(s) this person created for themselves — not scored`}>
+                      {r.self_assigned} self-assigned
+                    </span>
                   )}
                   {r.review && <div className="muted small">💡 {r.review}</div>}
                 </td>
