@@ -91,6 +91,13 @@ def _notify_task_assigned(task, actor):
         f"Task assigned by {who}: {task.title}"[:200],
         "\n".join(bits),
         link="/tasks",
+        wa_template=("new_task_assigned", [
+            task.assigned_to.get_full_name() or task.assigned_to.username,
+            f"{task.code} · {task.title}",
+            task.description or "—",
+            f"{task.get_priority_display()} (by {who})",
+            f"{timezone.localtime(task.due_at):%d %b %Y, %I:%M %p}" if task.due_at else "Not set",
+        ]),
     )
 
 

@@ -58,6 +58,13 @@ def send_task_reminders() -> int:
     for task in due:
         hours_over = int((now - task.due_at).total_seconds() // 3600)
         state = f"OVERDUE by {hours_over}h" if hours_over >= 1 else "due now"
+        wa_template = None
+        if hours_over >= 1:  # the approved template reads "OVERDUE by {{3}}"
+            wa_template = ("task_overdue_reminder", [
+                task.assigned_to.get_full_name() or task.assigned_to.username,
+                f"{task.code} · {task.title}",
+                f"{hours_over}h",
+            ])
         notify(
             task.assigned_to, "task_due",
             f"Task due: {task.title}"[:200],
@@ -65,6 +72,7 @@ def send_task_reminders() -> int:
             + (task.description[:200] if task.description else "")
             + (f"\nLead: {task.lead.customer_name}" if task.lead else ""),
             link="/tasks",
+            wa_template=wa_template,
         )
         task.reminded_at = now
         task.save(update_fields=["reminded_at"])

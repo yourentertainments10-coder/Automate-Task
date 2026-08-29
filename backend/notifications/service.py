@@ -8,10 +8,18 @@ from .channels import gmail, whatsapp
 from .models import Notification
 
 
-def notify(user, type_: str, title: str, body: str = "", link: str = "") -> Notification:
+def notify(user, type_: str, title: str, body: str = "", link: str = "",
+           wa_template: tuple[str, list] | None = None) -> Notification:
+    """wa_template=(template_name, [params]) routes the WhatsApp leg through
+    an approved Meta template (deliverable any time); without it the message
+    goes as free-form text, which Meta only delivers inside a 24h
+    customer-service window."""
     results = []
     results.append(gmail.send_email(user.email, f"[Automation Task] {title}", body or title))
-    results.append(whatsapp.send_text(user.whatsapp_phone, f"{title}\n{body}".strip()))
+    if wa_template:
+        results.append(whatsapp.send_template(user.whatsapp_phone, wa_template[0], wa_template[1]))
+    else:
+        results.append(whatsapp.send_text(user.whatsapp_phone, f"{title}\n{body}".strip()))
     return Notification.objects.create(
         user=user, type=type_, title=title, body=body, link=link, channels=results,
     )

@@ -1,3 +1,6 @@
+import os
+from unittest import mock
+
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -11,7 +14,17 @@ def make(username, role, **kw):
     return User.objects.create_user(username, f"{username}@x.com", "pass@12345", role=role, **kw)
 
 
-class NotifyServiceTests(TestCase):
+class ChannelsDisabledMixin:
+    """Real WhatsApp/Gmail credentials may be present in .env — tests must
+    never send actual messages, so both channels are forced off."""
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.dict(os.environ, {"WHATSAPP_ENABLED": "false", "GMAIL_ENABLED": "false"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class NotifyServiceTests(ChannelsDisabledMixin, TestCase):
     def test_notify_creates_inapp_and_records_skipped_channels(self):
         u = make("neha", Role.SALES_EXECUTIVE, whatsapp_phone="919800000001")
         n = notify(u, "test", "Hello", "Body here")
@@ -21,14 +34,15 @@ class NotifyServiceTests(TestCase):
         self.assertEqual(channels, {"gmail": "skipped", "whatsapp": "skipped"})
 
     def test_whatsapp_skip_reason_without_phone(self):
-        u = make("nophone", Role.SUPPORT)
+        u = make("nophone", Role.DEVELOPER)
         n = notify(u, "test", "Hi")
         wa = next(c for c in n.channels if c["channel"] == "whatsapp")
         self.assertIn("no whatsapp number", wa["detail"])
 
 
-class NotificationApiTests(TestCase):
+class NotificationApiTests(ChannelsDisabledMixin, TestCase):
     def setUp(self):
+        super().setUp()
         self.client = APIClient()
         self.a = make("asha", Role.SALES_EXECUTIVE)
         self.b = make("bala", Role.SALES_EXECUTIVE)

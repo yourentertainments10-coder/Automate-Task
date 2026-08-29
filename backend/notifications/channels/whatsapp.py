@@ -93,19 +93,25 @@ def send_text(to_phone: str, body: str) -> dict:
     })
 
 
+def _param(value) -> str:
+    """Template body params reject newlines/tabs — flatten to one line."""
+    clean = " ".join(str(value).split())
+    return clean[:500] or "—"
+
+
 def send_template(to_phone: str, template_name: str, params: list[str], lang: str = "en") -> dict:
     if not to_phone:
         return {"channel": "whatsapp", "status": "skipped", "detail": "user has no whatsapp number"}
     return _post({
         "messaging_product": "whatsapp",
-        "to": to_phone,
+        "to": _normalize(to_phone),
         "type": "template",
         "template": {
             "name": template_name,
             "language": {"code": lang},
             "components": [{
                 "type": "body",
-                "parameters": [{"type": "text", "text": p} for p in params],
+                "parameters": [{"type": "text", "text": _param(p)} for p in params],
             }],
         },
     })
