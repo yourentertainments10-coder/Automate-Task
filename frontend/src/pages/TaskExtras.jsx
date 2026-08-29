@@ -365,9 +365,16 @@ export function ChangeRequests({ isAdmin, onChanged }) {
                 <span className={`q-pill q-${r.status === 'pending' ? 'under_review' : r.status}`}>{r.status_display}</span>
                 {r.escalated && <span className="ai-chip">↑ escalated to admin</span>}
               </div>
-              <div className="small" style={{ marginTop: 4 }}>
-                <strong>{describeChanges(r.changes)}</strong>
+              <div className="small muted" style={{ marginTop: 2 }}>
+                Task of <strong>{r.task_assignee_name || r.task_assignee || '—'}</strong>
+                {r.task_created_by_name && <> · created by {r.task_created_by_name}</>}
               </div>
+              {/* changes_display comes from the server (same text as the
+                  approval email) so an id never leaks into the UI again */}
+              <ul className="chg-list">
+                {(r.changes_display?.length ? r.changes_display : [describeChanges(r.changes)])
+                  .map((line, i) => <li key={i}>{line}</li>)}
+              </ul>
               <div className="small muted">Reason: {r.reason}</div>
               <div className="when">
                 {r.requested_by?.name} · {fmtDT(r.created_at)}

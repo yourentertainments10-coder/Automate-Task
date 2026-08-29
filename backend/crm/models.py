@@ -275,6 +275,62 @@ class TaskChangeRequest(models.Model):
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["status"])]
 
+    # Raw keys like "due_at"/"assigned_to" are meaningless in an email, and a
+    # bare user id ("assignee -> 48") is worse. One renderer, used by both the
+    # notification and the Requests card, so they can never drift apart.
+    FIELD_LABELS = {
+        "due_at": "Due date", "effort_minutes": "Effort", "priority": "Priority",
+        "title": "Title", "description": "Description", "frequency": "Recurrence",
+        "repeat_until": "Repeat until", "category": "Category",
+        "assigned_to": "Assignee",
+    }
+
+    @staticmethod
+    def _fmt(field, value):
+        if value in (None, ""):
+            return "not set"
+        if field == "due_at":
+            dt = value
+            if isinstance(dt, str):
+                from django.utils.dateparse import parse_datetime
+                dt = parse_datetime(dt) or value
+            if hasattr(dt, "date"):
+                return f"{timezone.localtime(dt):%d %b %Y, %I:%M %p}"
+            return str(value)
+        if field == "effort_minutes":
+            m = int(value)
+            if m < 60:
+                return f"{m}m"
+            return f"{m // 60}h" if m % 60 == 0 else f"{m // 60}h {m % 60}m"
+        if field == "assigned_to":
+            from accounts.models import User
+            who = value if hasattr(value, "pk") else User.objects.filter(pk=value).first()
+            return (who.get_full_name() or who.username) if who else f"user #{value}"
+        if field == "priority":
+            return dict(LeadPriority.choices).get(value, value)
+        if field == "frequency":
+            return dict(TaskFrequency.choices).get(value, value)
+        text = str(value)
+        return text if len(text) <= 200 else text[:199].rstrip() + "…"
+
+    def describe(self) -> list[str]:
+        """Human-readable lines for every proposed change. While the request
+        is pending the task still holds the old value, so show 'old -> new';
+        once reviewed the change is already applied and an 'X -> X' arrow
+        would just read as a bug, so show the requested value alone."""
+        pending = self.status == ChangeRequestStatus.PENDING
+        lines = []
+        for field, new in (self.changes or {}).items():
+            if field == "cancel":
+                lines.append("Cancel the task")
+                continue
+            label = self.FIELD_LABELS.get(field, field)
+            shown_new = self._fmt(field, new)
+            old = self._fmt(field, getattr(self.task, field, None)) if pending else None
+            lines.append(f"{label}: {old} -> {shown_new}"
+                         if pending and old != shown_new else f"{label}: {shown_new}")
+        return lines
+
     def __str__(self):
         return f"Change request on {self.task_id} by {self.requested_by} [{self.status}]"
 

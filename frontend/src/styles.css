@@ -679,3 +679,7 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .form-grid input:disabled { background: var(--bg); color: var(--muted); }
 .form-grid input:focus, .form-grid select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+/* Change-request card: one proposed change per line, "Label: old → new" */
+.chg-list { margin: 5px 0 4px; padding-left: 18px; font-size: 13px; font-weight: 600; }
+.chg-list li { margin: 1px 0; }

@@ -49,6 +49,37 @@ def _approvers_for(req: TaskChangeRequest):
     return list(_admins().exclude(pk=req.requested_by_id))
 
 
+def _change_request_body(req: TaskChangeRequest, approver) -> str:
+    """The approval email/WhatsApp has to stand on its own: WHICH task, WHOSE
+    task it is, what exactly changes, and why it reached this person. Without
+    that an approver only sees "wants to change due_at, assigned_to" and has
+    no idea why it landed in their inbox."""
+    task = req.task
+
+    def who(u):
+        return (u.get_full_name() or u.username) if u else "-"
+
+    if approver.id == task.created_by_id:
+        because = "This is yours to decide because you created this task."
+    elif has_capability(approver, "tasks.view_all"):
+        because = ("This reached you as an admin because the task's own "
+                   "creator raised the request.")
+    else:
+        because = "You have been asked to review this request."
+    lines = [
+        f"Task: {task.code} - {task.title}",
+        f"Assigned to: {who(task.assigned_to)}",
+        f"Task created by: {who(task.created_by)}",
+        f"Change requested by: {who(req.requested_by)}",
+        "",
+        "Proposed changes:",
+    ]
+    lines += [f"  - {line}" for line in req.describe()]
+    lines += ["", f"Reason: {req.reason[:300]}", "", because,
+              "Open Tasks -> Requests to approve, reject or escalate."]
+    return "\n".join(lines)
+
+
 def can_review_request(user, req: TaskChangeRequest) -> bool:
     if req.requested_by_id == user.id:
         return False                       # never your own request
@@ -1032,12 +1063,14 @@ class TaskViewSet(viewsets.ModelViewSet):
         ser.is_valid(raise_exception=True)
         req = ser.save(task=task, requested_by=request.user)
         approver_side = "the task creator" if request.user.id != task.created_by_id else "an admin"
-        act(task, request.user, f"Change requested ({', '.join(req.changes)}) — awaiting {approver_side}")
+        # the activity feed gets the same friendly labels, not raw field names
+        fields = ", ".join(TaskChangeRequest.FIELD_LABELS.get(f, f).lower()
+                           for f in req.changes)
+        act(task, request.user, f"Change requested ({fields}) — awaiting {approver_side}")
         for approver in _approvers_for(req):
             notify(approver, "task_change_request",
                    f"Change request on {task.code}: {task.title}"[:200],
-                   f"{request.user.get_full_name() or request.user.username} wants to change "
-                   f"{', '.join(req.changes)}.\nReason: {req.reason[:200]}",
+                   _change_request_body(req, approver),
                    link="/tasks")
         return Response(TaskChangeRequestSerializer(req).data, status=http.HTTP_201_CREATED)
 

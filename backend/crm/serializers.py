@@ -209,14 +209,31 @@ class TaskChangeRequestSerializer(serializers.ModelSerializer):
     task_code = serializers.CharField(source="task.code", read_only=True)
     task_title = serializers.CharField(source="task.title", read_only=True)
     task_assignee = serializers.CharField(source="task.assigned_to.username", read_only=True)
+    # who the task actually belongs to, so an approver never has to guess
+    task_assignee_name = serializers.SerializerMethodField()
+    task_created_by_name = serializers.SerializerMethodField()
+    changes_display = serializers.SerializerMethodField()
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = TaskChangeRequest
         fields = ["id", "task", "task_code", "task_title", "task_assignee",
+                  "task_assignee_name", "task_created_by_name", "changes_display",
                   "requested_by", "changes", "reason", "status", "status_display",
                   "escalated", "reviewed_by", "remarks", "reviewed_at", "created_at"]
         read_only_fields = ["task", "status", "escalated", "remarks", "reviewed_at"]
+
+    def _name(self, who):
+        return (who.get_full_name() or who.username) if who else None
+
+    def get_task_assignee_name(self, obj):
+        return self._name(obj.task.assigned_to if obj.task_id else None)
+
+    def get_task_created_by_name(self, obj):
+        return self._name(obj.task.created_by if obj.task_id else None)
+
+    def get_changes_display(self, obj):
+        return obj.describe()
 
     def validate_changes(self, value):
         if not isinstance(value, dict) or not value:
