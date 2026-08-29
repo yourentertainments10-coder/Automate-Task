@@ -65,9 +65,13 @@ function Directory() {
   const [fRole, setFRole] = useState('')
   const [wlFor, setWlFor] = useState(null)   // C2: which member's workload is open
   const [profileFor, setProfileFor] = useState(null)  // name click -> full drill-down
+  const [viewable, setViewable] = useState(new Set()) // whose task profile I may open
   const [err, setErr] = useState('')
 
   useEffect(() => { api('/api/team/').then(setRows).catch(e => setErr(e.message)) }, [])
+  useEffect(() => {
+    api('/api/tasks/people/').then(d => setViewable(new Set(d.map(p => p.id)))).catch(() => {})
+  }, [])
 
   const shown = useMemo(() => (rows || []).filter(u => {
     if (fRole && u.role !== fRole) return false
@@ -104,8 +108,10 @@ function Directory() {
             <>
               <tr key={u.id}>
                 <td>
-                  <button className="link-name" title="Open full task profile"
-                    onClick={() => setProfileFor(u)}>{u.name}</button>
+                  {viewable.has(u.id) ? (
+                    <button className="link-name" title="Open full task profile"
+                      onClick={() => setProfileFor(u)}>{u.name}</button>
+                  ) : <strong>{u.name}</strong>}
                   <div className="muted small">{u.email || '@' + u.username}</div>
                 </td>
                 <td>{u.mobile || '—'}</td>
@@ -147,10 +153,14 @@ function ManageTeam() {
   const [fManager, setFManager] = useState('')
   const [wlFor, setWlFor] = useState(null)       // C2: which member's workload is open
   const [profileFor, setProfileFor] = useState(null)  // name click -> full drill-down
+  const [viewable, setViewable] = useState(new Set()) // whose task profile I may open
   const [err, setErr] = useState('')
 
   const load = () => api('/api/users/?page_size=200').then(d => setRows(d.results || d)).catch(e => setErr(e.message))
   useEffect(() => { load() }, [])
+  useEffect(() => {
+    api('/api/tasks/people/').then(d => setViewable(new Set(d.map(p => p.id)))).catch(() => {})
+  }, [])
 
   const managers = useMemo(() =>
     rows.filter(u => ['admin', 'sales_manager', 'hr_manager', 'it_lead',
@@ -203,10 +213,12 @@ function ManageTeam() {
             <>
               <tr key={u.id} className={u.is_active ? '' : 'inactive'}>
                 <td>
-                  <button className="link-name" title="Open full task profile"
-                    onClick={() => setProfileFor(u)}>
-                    {u.first_name || u.username} {u.last_name}
-                  </button>
+                  {viewable.has(u.id) ? (
+                    <button className="link-name" title="Open full task profile"
+                      onClick={() => setProfileFor(u)}>
+                      {u.first_name || u.username} {u.last_name}
+                    </button>
+                  ) : <strong>{u.first_name || u.username} {u.last_name}</strong>}
                   <div className="muted small">{u.email || '@' + u.username}</div>
                 </td>
                 <td>{u.whatsapp_phone || '—'}</td>

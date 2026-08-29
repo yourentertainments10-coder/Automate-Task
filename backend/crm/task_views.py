@@ -732,17 +732,17 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     def _report_users(self, user, only_id=None):
         """People this viewer may see task data for: admin -> everyone,
-        manager -> their department plus their direct reports, everyone else
-        -> just themselves. ?user= narrows to one of them (403 otherwise)."""
+        department viewer -> their department, and ANYONE -> their own direct
+        reports (matching visible_tasks, so a lead with reports outside their
+        department still sees that team). ?user= narrows to one of them."""
+        from django.db.models import Q as _Q
         if has_capability(user, "tasks.view_all"):
             users = list(User.objects.filter(is_active=True))
-        elif has_capability(user, "tasks.view_department"):
-            from django.db.models import Q as _Q
-            users = list(User.objects.filter(is_active=True).filter(
-                _Q(department=user.department) | _Q(reporting_manager=user)
-                | _Q(pk=user.pk)).distinct())
         else:
-            users = [user]
+            scope = _Q(pk=user.pk) | _Q(reporting_manager=user)
+            if has_capability(user, "tasks.view_department"):
+                scope |= _Q(department=user.department)
+            users = list(User.objects.filter(is_active=True).filter(scope).distinct())
         if only_id:
             try:
                 only_id = int(only_id)

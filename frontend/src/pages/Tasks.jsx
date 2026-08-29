@@ -55,6 +55,12 @@ export default function Tasks() {
   const [prefill, setPrefill] = useState(null)   // template -> open list with modal
   const [listPreset, setListPreset] = useState(null)  // D3: tile click-through filters
   const [inboxCount, setInboxCount] = useState(0)
+  // Everyone whose tasks I may see. More than just me => I have a team, so
+  // the All Tasks tab is worth showing (covers admins, department managers
+  // AND anyone with direct reports).
+  const [people, setPeople] = useState([])
+  useEffect(() => { api('/api/tasks/people/').then(setPeople).catch(() => {}) }, [])
+  const hasTeam = isManager || people.length > 1
 
   const refreshInbox = useCallback(() => {
     api('/api/task-change-requests/?scope=inbox&page_size=1')
@@ -69,7 +75,7 @@ export default function Tasks() {
     ['dashboard', 'Dashboard'], ['my', 'My Tasks'],
     // All Tasks: everyone the viewer may see — admin the company, a manager
     // their department plus direct reports. Filter by person or department.
-    ...(isManager ? [['all', 'All Tasks']] : []),
+    ...(hasTeam ? [['all', 'All Tasks']] : []),
     ['delegated', 'Delegated'],
     ['subscribed', 'Subscribed'],
     ['requests', inboxCount > 0 ? `Requests (${inboxCount})` : 'Requests'],
@@ -91,7 +97,7 @@ export default function Tasks() {
         <TaskDashboard onTileClick={(preset) => { setListPreset(preset); setArea(preset.area) }} />
       )}
       {['my', 'all', 'delegated', 'subscribed'].includes(area) && (
-        <TaskList scope={area} key={area} prefill={prefill}
+        <TaskList scope={area} key={area} prefill={prefill} people={people}
           clearPrefill={() => setPrefill(null)} preset={listPreset}
           clearPreset={() => setListPreset(null)}
           onRequestsChanged={refreshInbox} />
@@ -99,7 +105,7 @@ export default function Tasks() {
       {area === 'requests' && <ChangeRequests isAdmin={isAdmin} onChanged={refreshInbox} />}
       {area === 'templates' && <Templates onUse={useTemplate} />}
       {area === 'directory' && <Directory />}
-      {area === 'activities' && <Activities />}
+      {area === 'activities' && <Activities people={people} />}
       {area === 'time' && <TimeReport />}
       {area === 'employees' && <EmployeesReport />}
       {area === 'disputes' && <DisputesReport />}
@@ -280,7 +286,7 @@ function TaskDashboard({ onTileClick }) {
 
 const STATUS_TABS = [['open,in_progress', 'Open'], ['done', 'Done'], ['', 'All']]
 
-function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequestsChanged }) {
+function TaskList({ scope, prefill, people = [], clearPrefill, preset, clearPreset, onRequestsChanged }) {
   const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [team, setTeam] = useState([])        // hierarchy-filtered: who I may assign to
@@ -299,7 +305,6 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
   }, [preset])  // eslint-disable-line react-hooks/exhaustive-deps
   const [onlyRecurring, setOnlyRecurring] = useState(false)
   // "All Tasks" only: who / which department / free-text search
-  const [people, setPeople] = useState([])
   const [fPerson, setFPerson] = useState('')
   const [fDept, setFDept] = useState('')
   const [search, setSearch] = useState('')
@@ -333,10 +338,6 @@ function TaskList({ scope, prefill, clearPrefill, preset, clearPreset, onRequest
     api('/api/groups/?active=true').then(setGroups).catch(() => {})
     api('/api/task-settings/').then(setSettings).catch(() => {})
   }, [])
-  useEffect(() => {
-    if (scope === 'all') api('/api/tasks/people/').then(setPeople).catch(() => {})
-  }, [scope])
-
   // department dropdown lists only departments that actually have people
   const deptOptions = useMemo(() => {
     const seen = new Map()
@@ -997,10 +998,9 @@ function TemplateModal({ onClose, onSaved }) {
 
 /* ================= Activities ================= */
 
-function Activities() {
+function Activities({ people = [] }) {
   const { user } = useAuth()
   const [rows, setRows] = useState([])
-  const [people, setPeople] = useState([])
   const [days, setDays] = useState('7')
   const [who, setWho] = useState('')         // whose TASK the activity is on
   const [actor, setActor] = useState('')     // who performed it
@@ -1013,8 +1013,6 @@ function Activities() {
     const id = setTimeout(() => setDebounced(search.trim()), 300)
     return () => clearTimeout(id)
   }, [search])
-  useEffect(() => { api('/api/tasks/people/').then(setPeople).catch(() => {}) }, [])
-
   const load = useCallback(() => {
     const p = new URLSearchParams({ page_size: '100' })
     if (days) p.set('days', days)
@@ -1033,14 +1031,18 @@ function Activities() {
             <button key={l} className={'seg-btn' + (days === v ? ' on' : '')} onClick={() => setDays(v)}>{l}</button>
           ))}
         </div>
-        <select value={who} onChange={e => setWho(e.target.value)}>
-          <option value="">Whose task — anyone</option>
-          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <select value={actor} onChange={e => setActor(e.target.value)}>
-          <option value="">Done by — anyone</option>
-          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        {people.length > 1 && (
+          <>
+            <select value={who} onChange={e => setWho(e.target.value)}>
+              <option value="">Whose task — anyone</option>
+              {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <select value={actor} onChange={e => setActor(e.target.value)}>
+              <option value="">Done by — anyone</option>
+              {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </>
+        )}
         <input type="search" placeholder="Search activity or task…"
           value={search} onChange={e => setSearch(e.target.value)} />
         {(who || actor || search) && (
