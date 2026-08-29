@@ -67,10 +67,16 @@ def send_task_reminders() -> int:
             ])
         notify(
             task.assigned_to, "task_due",
-            f"Task due: {task.title}"[:200],
-            f"{task.code} · {state} · due {timezone.localtime(task.due_at):%d %b %H:%M}\n"
-            + (task.description[:200] if task.description else "")
-            + (f"\nLead: {task.lead.customer_name}" if task.lead else ""),
+            (f"Overdue by {hours_over}h" if hours_over >= 1 else "Due now")
+            + f" - {task.code}: {task.title}"[:200],
+            "\n".join([
+                f"Task: {task.code} - {task.title}",
+                f"Status: {state} (due {timezone.localtime(task.due_at):%d %b %Y, %I:%M %p})",
+                f"Assigned by: {task.created_by.get_full_name() or task.created_by.username}"
+                if task.created_by else "Assigned by: -",
+            ] + ([task.description[:300]] if task.description else [])
+              + ([f"Lead: {task.lead.customer_name}"] if task.lead else [])
+              + ["", "Finish it, or open Tasks to post a status update."]),
             link="/tasks",
             wa_template=wa_template,
         )
@@ -112,8 +118,8 @@ def send_daily_task_digest(force=False) -> int:
                   for t in due_today[:4]]
         notify(
             user, "task_daily",
-            f"Today: {len(due_today)} due · {len(overdue)} overdue · {len(tasks)} open"[:200],
-            "\n".join(lines) or "No deadlines today — clear the open list!",
+            f"Your tasks today - {len(due_today)} due, {len(overdue)} overdue, {len(tasks)} open"[:200],
+            ("\n".join(lines) or "Nothing is due today.") + "\n\nOpen Tasks to work through them.",
             link="/tasks",
         )
         sent += 1

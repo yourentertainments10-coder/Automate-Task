@@ -329,8 +329,18 @@ class MistakeViewSet(viewsets.ModelViewSet):
         log(mistake, request.user, f"Corrective task created: {task.code} → "
             f"{assignee.get_full_name() or assignee.username}, due in {due_days} day(s)")
         notify(assignee, "task_assigned",
-               f"Corrective task: {task.title}"[:200],
-               f"Linked to mistake {mistake.code} ({mistake.category}).", link="/tasks")
+               f"Corrective task {task.code}: {task.title}"[:200],
+               "\n".join([
+                   f"Task: {task.code} - {task.title}",
+                   f"Why: fixing mistake {mistake.code} ({mistake.category})",
+                   f"Raised for: {mistake.employee.get_full_name() or mistake.employee.username}",
+                   f"Due: {timezone.localtime(task.due_at):%d %b %Y, %I:%M %p}"
+                   if task.due_at else "Due: not set",
+                   "",
+                   mistake.description[:300] if mistake.description else "",
+                   "",
+                   "Complete this task to close the mistake.",
+               ]), link="/tasks")
         return Response(MistakeSerializer(mistake).data, status=http.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"])

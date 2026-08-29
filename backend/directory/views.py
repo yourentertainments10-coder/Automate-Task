@@ -162,7 +162,14 @@ class DirectoryTemplateViewSet(viewsets.ModelViewSet):
         if assignee != request.user:
             from notifications.service import notify
             notify(assignee, "task_assigned",
-                   f"{len(created)} tasks assigned: {tpl.name}",
-                   f"From the {tpl.industry.name} template library.", link="/tasks")
+                   f"{len(created)} new tasks assigned to you: {tpl.name}"[:200],
+                   "\n".join([
+                       f"{len(created)} tasks were created for you from the",
+                       f"'{tpl.name}' template ({tpl.industry.name} library).",
+                       "",
+                   ] + [f"  - {t.code} {t.title}" for t in created[:10]]
+                     + ([f"  ...and {len(created) - 10} more"] if len(created) > 10 else [])
+                     + ["", "Open Tasks > My Tasks to see due dates and start."]),
+                   link="/tasks")
         return Response(TaskSerializer(created, many=True, context={"request": request}).data,
                         status=status.HTTP_201_CREATED)

@@ -144,9 +144,14 @@ def _run_integrations(submission: FormSubmission):
             )
             notify(
                 assignee, "task_assigned",
-                f"Task assigned: {task.title}",
-                f"New submission on form '{form.name}'"
-                + (f" -- lead: {lead.customer_name}" if lead else ""),
+                f"New task {task.code} from form '{form.name}': {task.title}"[:200],
+                "\n".join([
+                    f"Task: {task.code} - {task.title}",
+                    f"Source: a new submission on the form '{form.name}'",
+                ] + ([f"Lead: {lead.customer_name}"] if lead else [])
+                  + ([f"Due: {timezone.localtime(task.due_at):%d %b %Y, %I:%M %p}"]
+                     if task.due_at else [])
+                  + ["", "Open Tasks to see the submission and start work."]),
                 link="/tasks",
             )
             submission.task = task

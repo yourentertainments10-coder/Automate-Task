@@ -350,9 +350,17 @@ class TaskViewSet(viewsets.ModelViewSet):
                 if colleague and colleague.pk != user.pk:
                     task.subscribers.add(colleague)
                     notify(colleague, "task_inloop",
-                           f"You're in the loop: {task.code} {task.title}"[:200],
-                           f"Added by {user.get_full_name() or user.username}. "
-                           "The task appears in your Subscribed tab.",
+                           f"Kept in the loop - {task.code}: {task.title}"[:200],
+                           "\n".join([
+                               f"Task: {task.code} - {task.title}",
+                               f"Assigned to: {task.assigned_to.get_full_name() or task.assigned_to.username}",
+                               f"Added you: {user.get_full_name() or user.username}",
+                               f"Due: {timezone.localtime(task.due_at):%d %b %Y, %I:%M %p}"
+                               if task.due_at else "Due: not set",
+                               "",
+                               "You are only following this - it is not assigned to you.",
+                               "It shows under Tasks > Subscribed.",
+                           ]),
                            link="/tasks")
         act(task, user, f"Created and assigned to {task.assigned_to.get_full_name() or task.assigned_to.username}")
         if task.lead:
@@ -502,9 +510,20 @@ class TaskViewSet(viewsets.ModelViewSet):
                                     text=text[:300], kind="comment")
         for target in (task.assigned_to, task.created_by):
             if target and target.is_active and target.pk != request.user.pk:
+                who_c = request.user.get_full_name() or request.user.username
                 notify(target, "task_comment",
-                       f"💬 {task.code}: {request.user.get_full_name() or request.user.username}",
-                       text[:300], link="/tasks")
+                       f"Comment from {who_c} on {task.code}: {task.title}"[:200],
+                       "\n".join([
+                           f"Task: {task.code} - {task.title}",
+                           f"Assigned to: {task.assigned_to.get_full_name() or task.assigned_to.username}"
+                           if task.assigned_to else "Assigned to: -",
+                           "",
+                           f"{who_c} wrote:",
+                           text[:300],
+                           "",
+                           "Open Tasks to reply.",
+                       ]),
+                       link="/tasks")
         acts = task.activities.select_related("actor")[:100]
         return Response(TaskActivitySerializer(acts, many=True).data,
                         status=http.HTTP_201_CREATED)
@@ -685,8 +704,22 @@ class TaskViewSet(viewsets.ModelViewSet):
         # the person who delegated it sees progress without asking
         if task.created_by_id and task.created_by_id != request.user.id \
                 and task.created_by.is_active:
+            who_upd = request.user.get_full_name() or request.user.username
+            headline = (f"{task.progress_percent}% done"
+                        if percent not in (None, "") else "status update")
             notify(task.created_by, "task_progress",
-                   f"{task.code} — {' · '.join(updates)}"[:200], task.title, link="/tasks")
+                   f"Progress on {task.code} ({headline}): {task.title}"[:200],
+                   "\n".join([
+                       f"Task: {task.code} - {task.title}",
+                       f"Updated by: {who_upd}",
+                       "",
+                       "Update: " + " * ".join(updates),
+                       f"Due: {timezone.localtime(task.due_at):%d %b %Y, %I:%M %p}"
+                       if task.due_at else "Due: not set",
+                       "",
+                       "No action needed unless this looks off - open Tasks to reply.",
+                   ]),
+                   link="/tasks")
         return Response(TaskSerializer(task, context={"request": request}).data)
 
     @action(detail=False, methods=["get"])
@@ -1218,14 +1251,21 @@ class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
                 f"Change request escalated to admin by {request.user.get_full_name() or request.user.username}")
             for admin in _admins().exclude(pk=req.requested_by_id):
                 notify(admin, "task_change_request",
-                       f"ESCALATED: change request on {req.task.code} {req.task.title}"[:200],
-                       f"{request.user.get_full_name() or request.user.username} escalated "
-                       f"{req.requested_by.username}'s request: {', '.join(req.changes)}."
-                       + (f"\nRemarks: {req.remarks}" if req.remarks else ""),
+                       f"Escalated to you - change request on {req.task.code}: {req.task.title}"[:200],
+                       _change_request_body(req, admin)
+                       + f"\nEscalated by: {request.user.get_full_name() or request.user.username}"
+                       + (f"\nTheir remarks: {req.remarks}" if req.remarks else ""),
                        link="/tasks")
             notify(req.requested_by, "task_change_reviewed",
-                   f"Your request on {req.task.code} was escalated to admin"[:200],
-                   req.remarks or "", link="/tasks")
+                   f"Sent to admin - your change request on {req.task.code}: {req.task.title}"[:200],
+                   "\n".join([
+                       f"Task: {req.task.code} - {req.task.title}",
+                       f"Passed up by: {request.user.get_full_name() or request.user.username}",
+                       "", "You asked to change:",
+                   ] + [f"  - {line}" for line in req.describe()]
+                     + ([f"\nTheir remarks: {req.remarks}"] if req.remarks else [])
+                     + ["", "An admin will decide this now - nothing to do until then."]),
+                   link="/tasks")
             return Response(TaskChangeRequestSerializer(req).data)
 
         req.status = decision
@@ -1244,18 +1284,36 @@ class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
             act(task, request.user, "Change request rejected"
                 + (f": {req.remarks}" if req.remarks else ""))
 
+        verdict = "approved" if decision == "approved" else "rejected"
         notify(req.requested_by, "task_change_reviewed",
-               f"Change request {decision}: {task.code} {task.title}"[:200],
-               (f"Remarks: {req.remarks}" if req.remarks else "")
-               or ("Your requested changes have been applied." if decision == "approved" else ""),
+               f"Change request {verdict} - {task.code}: {task.title}"[:200],
+               "\n".join([
+                   f"Task: {task.code} - {task.title}",
+                   f"Reviewed by: {request.user.get_full_name() or request.user.username}",
+                   "",
+                   ("These changes are now live on the task:" if decision == "approved"
+                    else "These changes were NOT applied - the task is unchanged:"),
+               ] + [f"  - {line}" for line in req.describe()]
+                 + ([f"\nRemarks: {req.remarks}"] if req.remarks else [])
+                 + ["", ("Nothing to do - carry on with the task."
+                         if decision == "approved"
+                         else "Talk to the reviewer if you still need this change.")]),
                link="/tasks")
         # keep Admin in the loop on creator-approved requests too
         if not has_capability(request.user, "tasks.view_all"):
             for admin in _admins().exclude(pk__in=[request.user.pk, req.requested_by_id]):
                 notify(admin, "task_change_log",
-                       f"Task {task.code} modified via request ({decision})",
-                       f"{req.requested_by.username} -> approved by {request.user.username}: "
-                       f"{', '.join(req.changes)}", link="/tasks")
+                       f"FYI - {task.code} changed via request ({verdict}): {task.title}"[:200],
+                       "\n".join([
+                           f"Task: {task.code} - {task.title}",
+                           f"Assigned to: {task.assigned_to.get_full_name() or task.assigned_to.username}"
+                           if task.assigned_to else "Assigned to: -",
+                           f"Requested by: {req.requested_by.get_full_name() or req.requested_by.username}",
+                           f"{verdict.title()} by: {request.user.get_full_name() or request.user.username}",
+                           "", "Changes:",
+                       ] + [f"  - {line}" for line in req.describe()]
+                         + ["", "Log only - no action needed."]),
+                       link="/tasks")
         return Response(TaskChangeRequestSerializer(req).data)
 
     def _apply(self, task, changes, actor):
