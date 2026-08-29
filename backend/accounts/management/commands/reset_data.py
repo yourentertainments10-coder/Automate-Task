@@ -23,7 +23,7 @@ REAL_TEAM = [
     # One person, two mailboxes (accounts@ + finance@) — finance@ is his
     # unique address so email-login works; accounts@ stays Kesar's.
     ("Anurag", "finance@cartrends.net", "anurag", "Anurag", "", Role.ACCOUNTS, "accounts"),
-    ("Arun Sharma", "arun.sharma@cartrends.in", "arun", "Arun", "Sharma", Role.SALES_EXECUTIVE, "sales"),
+    ("Arun Sharma", "arun.sharma@cartrends.in", "arun", "Arun", "Sharma", Role.SALES_MANAGER, "sales"),
     ("Bhagwan Ji", "Bhagwanshaysharma449@gmail.com", "bhagwan", "Bhagwan", "Ji", Role.SALES_EXECUTIVE, "sales"),
     ("Bhawna Singh", "bhawna.singh@cartrends.in", "bhawna", "Bhawna", "Singh", Role.SALES_EXECUTIVE, "sales"),
     ("Tarun", "hr@cartrends.net", "tarun", "Tarun", "", Role.HR_MANAGER, "hr"),
@@ -42,7 +42,7 @@ REAL_TEAM = [
     ("Rahul Sinha", "Bijwasan@cartrends.net", "rahul.sinha", "Rahul", "Sinha", Role.WAREHOUSE_MANAGER, "warehouse"),
     ("Rahul Thakur", "rahulthakur3928@gmail.com", "rahul.thakur", "Rahul", "Thakur", Role.RIDER, "warehouse"),
     ("Ramprasad Pandey", "ram.prasad@cartrends.in", "ramprasad", "Ramprasad", "Pandey", Role.SALES_EXECUTIVE, "sales"),
-    ("Ronak", "ronak.sales@cartrends.in", "ronak", "Ronak", "", Role.SALES_EXECUTIVE, "sales"),
+    ("Ronak", "ronak.sales@cartrends.in", "ronak", "Ronak", "", Role.SALES_MANAGER, "sales"),
     ("Ronit Netwal", "ronit.netwal@cartrends.in", "ronit", "Ronit", "Netwal", Role.ACCOUNTS, "accounts"),
     ("Vikram Shekhawat", "vikram.shekhawat@cartrends.in", "vikram", "Vikram", "Shekhawat", Role.WAREHOUSE, "warehouse"),
     ("Roshan Mishra", "roshan.mishra@cartrends.in", "roshan", "Roshan", "Mishra", Role.SALES_EXECUTIVE, "sales"),
