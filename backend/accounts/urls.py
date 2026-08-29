@@ -15,5 +15,7 @@ urlpatterns = [
     path("auth/me", views.me),
     path("auth/change-password", views.change_password),
     path("team/", views.team_directory),
+    path("departments/", views.departments),
+    path("departments/<slug:code>/", views.department_detail),
     path("", include(router.urls)),
 ]

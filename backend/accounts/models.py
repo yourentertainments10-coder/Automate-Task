@@ -38,6 +38,41 @@ class Department(models.TextChoices):
     MANAGEMENT = "management", "Management"
 
 
+class DepartmentOption(models.Model):
+    """Admin-managed department list.
+
+    The `Department` choices above stay as the seed and as the constants the
+    code refers to (ROLE_DEFAULT_DEPARTMENT, scoping...). This table is what
+    the dropdowns actually read, so Admin can add a department -- or rename
+    one -- without a deploy. `code` is what gets stored on users/tasks/leads.
+    """
+    code = models.SlugField(max_length=20, unique=True)
+    name = models.CharField(max_length=60)
+    active = models.BooleanField(default=True)
+    order = models.PositiveSmallIntegerField(default=100)
+
+    class Meta:
+        ordering = ["order", "name"]
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def choices_list(cls):
+        """(code, name) for every active department, seeded rows included."""
+        rows = list(cls.objects.filter(active=True))
+        if not rows:                       # before the seed migration runs
+            return list(Department.choices)
+        return [(d.code, d.name) for d in rows]
+
+    @classmethod
+    def label_for(cls, code):
+        if not code:
+            return ""
+        row = cls.objects.filter(code=code).first()
+        return row.name if row else dict(Department.choices).get(code, code)
+
+
 ROLE_DEFAULT_DEPARTMENT = {
     Role.ADMIN: Department.MANAGEMENT,
     Role.SALES_MANAGER: Department.SALES,

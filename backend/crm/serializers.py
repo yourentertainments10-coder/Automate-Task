@@ -79,6 +79,7 @@ class LeadSerializer(serializers.ModelSerializer):
     priority_display = serializers.CharField(source="get_priority_display", read_only=True)
     department_display = serializers.CharField(source="get_department_display", read_only=True)
     is_overdue = serializers.BooleanField(read_only=True)
+    department = DepartmentField(required=False, allow_blank=True)
     can_edit = serializers.SerializerMethodField()
 
     class Meta:

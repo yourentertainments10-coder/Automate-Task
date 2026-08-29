@@ -1,4 +1,5 @@
 from django.db.models.functions import Lower
+from django.utils.text import slugify
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -7,7 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from rest_framework.exceptions import PermissionDenied
 
-from .models import Role, User
+from .models import DepartmentOption, Role, User
 from .permissions import HasCapability
 from .serializers import ChangePasswordSerializer, UserSerializer, UserWriteSerializer
 
@@ -16,6 +17,61 @@ from .serializers import ChangePasswordSerializer, UserSerializer, UserWriteSeri
 @permission_classes([IsAuthenticated])
 def me(request):
     return Response(UserSerializer(request.user).data)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def departments(request):
+    """The department dropdown, read by every form. Admin (settings.manage)
+    can add one; renaming/deactivating is a PATCH on /departments/<code>."""
+    from .permissions import has_capability
+    if request.method == "POST":
+        if not has_capability(request.user, "settings.manage"):
+            raise PermissionDenied("Only an admin can add a department.")
+        name = str(request.data.get("name", "")).strip()
+        if not name:
+            return Response({"name": "Give the department a name."}, status=400)
+        code = slugify(str(request.data.get("code") or name))[:20]
+        if not code:
+            return Response({"code": "Could not build a code from that name."}, status=400)
+        if DepartmentOption.objects.filter(code=code).exists():
+            return Response({"code": f"'{code}' already exists."}, status=400)
+        row = DepartmentOption.objects.create(code=code, name=name[:60])
+        return Response({"code": row.code, "name": row.name, "active": row.active},
+                        status=status.HTTP_201_CREATED)
+    rows = DepartmentOption.objects.filter(active=True)
+    if not rows.exists():                       # first boot, before the seed
+        from .models import Department
+        return Response([{"code": c, "name": n, "active": True} for c, n in Department.choices])
+    return Response([{"code": d.code, "name": d.name, "active": d.active} for d in rows])
+
+
+@api_view(["PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def department_detail(request, code):
+    """Rename (PATCH {name}) or hide (DELETE) one department. Hiding keeps
+    every user/task/lead already filed under it -- it only leaves the list."""
+    from .permissions import has_capability
+    if not has_capability(request.user, "settings.manage"):
+        raise PermissionDenied("Only an admin can change departments.")
+    row = DepartmentOption.objects.filter(code=code).first()
+    if not row:
+        return Response({"detail": "Unknown department."}, status=404)
+    if request.method == "DELETE":
+        in_use = User.objects.filter(department=code, is_active=True).count()
+        if in_use:
+            return Response(
+                {"detail": f"{in_use} active user(s) are still in this department — "
+                           "move them first."}, status=400)
+        row.active = False
+        row.save(update_fields=["active"])
+        return Response({"code": row.code, "active": False})
+    name = str(request.data.get("name", "")).strip()
+    if not name:
+        return Response({"name": "Give the department a name."}, status=400)
+    row.name = name[:60]
+    row.save(update_fields=["name"])
+    return Response({"code": row.code, "name": row.name, "active": row.active})
 
 
 @api_view(["GET"])

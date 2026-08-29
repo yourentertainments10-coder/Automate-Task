@@ -666,7 +666,6 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
   const [assignees, setAssignees] = useState([user.id])  // multi-select: one task per person
   const [categories, setCategories] = useState([])
   const [inLoop, setInLoop] = useState([])          // Loop: colleagues who follow the task
-  const [newCat, setNewCat] = useState(null)        // null = closed, '' = typing
   const [workloads, setWorkloads] = useState([])    // C1: pipeline per picked assignee
   const [aiPrompt, setAiPrompt] = useState(null)    // E3: null = closed
   const [aiChecklist, setAiChecklist] = useState([])
@@ -706,19 +705,6 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
       })
       .catch(() => setCategories([]))
   }, [f.department])
-
-  const addCategory = async () => {
-    const name = (newCat || '').trim()
-    if (!name) return
-    try {
-      const cat = await api('/api/task-categories/', {
-        method: 'POST', body: { name, department: f.department },
-      })
-      setCategories(prev => [...prev.filter(c => c.id !== cat.id), cat])
-      setF(prev => ({ ...prev, category: cat.name }))
-      setNewCat(null)
-    } catch (ex) { setErr(errorText(ex.data) || ex.message) }
-  }
 
   const submit = async (e) => {
     e.preventDefault()
@@ -804,28 +790,17 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
           </div>
           <div>
             <label>Category *</label>
-            {newCat === null ? (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <select value={f.category} onChange={set('category')} style={{ flex: 1 }}>
-                  <option value="">— pick a category —</option>
-                  {categories.map(c => (
-                    <option key={c.id} value={c.name}>
-                      {c.name}{c.department ? '' : ' (general)'}
-                    </option>
-                  ))}
-                </select>
-                {canAddCategory && (
-                  <button type="button" className="btn btn-sm" title="Add a new category"
-                    onClick={() => setNewCat('')}>+</button>
-                )}
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input value={newCat} onChange={e => setNewCat(e.target.value)} autoFocus
-                  placeholder="New category name" style={{ flex: 1 }}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCategory() } }} />
-                <button type="button" className="btn btn-sm btn-primary" onClick={addCategory}>Add</button>
-                <button type="button" className="btn btn-sm" onClick={() => setNewCat(null)}>✕</button>
+            <select value={f.category} onChange={set('category')}>
+              <option value="">— pick a category —</option>
+              {categories.map(c => (
+                <option key={c.id} value={c.name}>
+                  {c.name}{c.department ? '' : ' (general)'}
+                </option>
+              ))}
+            </select>
+            {canAddCategory && (
+              <div className="muted small">
+                Need a new one? Add it in <strong>Settings → Task categories</strong>.
               </div>
             )}
           </div>

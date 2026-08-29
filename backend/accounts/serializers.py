@@ -2,7 +2,7 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import User, Role
+from .models import DepartmentOption, Role, User
 from .permissions import capabilities_for
 
 
@@ -44,9 +44,25 @@ class UserSerializer(serializers.ModelSerializer):
         return capabilities_for(obj)
 
 
+class DepartmentField(serializers.CharField):
+    """Accepts any department Admin has added, not just the ones that were
+    hard-coded at build time. Blank stays allowed where the model allows it."""
+
+    def to_internal_value(self, data):
+        code = super().to_internal_value(data).strip()
+        if not code:
+            return ""
+        valid = {c for c, _ in DepartmentOption.choices_list()}
+        if code not in valid:
+            raise serializers.ValidationError(
+                f"Unknown department '{code}'. Pick one from the list.")
+        return code
+
+
 class UserWriteSerializer(serializers.ModelSerializer):
     """Admin create/update. Password optional on update, required on create."""
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    department = DepartmentField()
 
     class Meta:
         model = User
