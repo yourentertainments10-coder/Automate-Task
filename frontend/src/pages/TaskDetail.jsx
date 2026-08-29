@@ -41,12 +41,9 @@ export default function TaskDetailPanel({ taskId, user, team, settings, onClose,
   const doneChecks = t?.checklist?.filter(c => c.done).length ?? 0
 
   return (
-    <div className="modal" style={{ placeItems: 'stretch end', display: 'flex', justifyContent: 'flex-end' }}
+    <div className="modal side"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal-card" style={{
-        width: 480, maxWidth: '96vw', height: '100vh', maxHeight: '100vh',
-        borderRadius: '16px 0 0 16px', overflowY: 'auto',
-      }}>
+      <div className="modal-card side-panel narrow">
         {!t && <p className="muted">Loading…</p>}
         {t && (
           <>

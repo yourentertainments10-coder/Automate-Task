@@ -462,6 +462,27 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
   }
   .modal-actions { position: sticky; bottom: 0; background: var(--surface); padding-top: 12px; }
 
+  /* Slide-overs become full-screen sheets — no sliver of scrim, no rounded
+     left edge, and dvh so the browser's address bar can't clip the footer.
+     Selectors are deliberately specific: the base .side-panel rules sit
+     further down this file and would otherwise win on source order. */
+  .modal.side { align-items: stretch; }
+  .modal.side .side-panel, .modal.side .side-panel.narrow {
+    width: 100%; max-width: 100%; border-radius: 0;
+    height: 100vh; height: 100dvh; max-height: 100dvh;
+  }
+  /* A profile's summary tiles stay 2-up so the task list isn't pushed off
+     screen (the 420px rule below makes ordinary .stat tiles full width). */
+  .stats.compact .stat { flex: 1 1 calc(50% - 5px); min-width: 0; }
+
+  /* A name is only ~15px of text — too small to tap. Grow the hit area with
+     an overlay instead of padding, so table rows and the task-row meta line
+     keep their current spacing. */
+  .link-name { position: relative; }
+  /* ~33px tall, in line with the app's other touch targets. Kept modest on
+     purpose: the band above sits over the task's own click area. */
+  .link-name::after { content: ""; position: absolute; inset: -9px -8px; }
+
   /* Filters wrap and stay thumb-friendly */
   .filters { gap: 8px; }
   .filters input[type="search"] { width: 100%; }
@@ -477,6 +498,9 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
   .area-tabs { overflow-x: auto; white-space: nowrap; flex-wrap: nowrap; }
   .area-tabs .tab { flex-shrink: 0; }
   .task-row { flex-wrap: wrap; }
+  /* Chips share the title's flex row; without wrapping they squeeze a long
+     title into a 3-4 line column on a phone. */
+  .task-title { flex-wrap: wrap; }
   .notif-list, .task-list { max-width: 100%; }
   .public-card { width: 100%; }
   .chart-box { height: 200px; }
@@ -484,6 +508,7 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 
 @media (max-width: 420px) {
   .stat { flex: 1 1 100%; }
+  .stats.compact .stat { flex: 1 1 calc(50% - 5px); }
   .col { min-width: 86vw; width: 86vw; }
 }
 
@@ -624,6 +649,15 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
   color: var(--accent); cursor: pointer; text-align: left;
 }
 .link-name:hover { text-decoration: underline; }
+
+/* Right-hand slide-over (person profile, task detail). A class, not inline
+   styles, so the mobile rules below can turn it into a full-screen sheet. */
+.modal.side { display: flex; place-items: stretch end; justify-content: flex-end; }
+.side-panel {
+  width: 720px; max-width: 96vw; height: 100vh; max-height: 100vh;
+  border-radius: 16px 0 0 16px; overflow-y: auto;
+}
+.side-panel.narrow { width: 480px; }
 
 /* ---------- Modal ---------- */
 .modal {

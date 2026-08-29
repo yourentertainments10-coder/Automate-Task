@@ -42,12 +42,9 @@ export default function PersonProfile({ userId, name, onClose }) {
 
   const s = stats
   return (
-    <div className="modal" style={{ placeItems: 'stretch end', display: 'flex', justifyContent: 'flex-end' }}
+    <div className="modal side"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal-card" style={{
-        width: 720, maxWidth: '96vw', height: '100vh', maxHeight: '100vh',
-        borderRadius: '16px 0 0 16px', overflowY: 'auto',
-      }}>
+      <div className="modal-card side-panel">
         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
           <h2 style={{ margin: 0, flex: 1 }}>{stats?.name || name}</h2>
           <button className="btn btn-sm" onClick={onClose}>✕</button>
@@ -66,7 +63,7 @@ export default function PersonProfile({ userId, name, onClose }) {
         {!s && !err && <p className="muted small">Loading summary…</p>}
         {s && (
           <>
-            <div className="stats" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+            <div className="stats compact">
               <div className="stat"><div className="label">Total</div><div className="value">{s.total}</div></div>
               <div className="stat"><div className="label">Completed</div><div className="value ok">{s.completed}</div></div>
               <div className="stat"><div className="label">Pending</div><div className="value">{s.pending + s.in_progress}</div></div>
