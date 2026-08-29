@@ -84,10 +84,11 @@ def _notify_task_assigned(task, actor):
         facts.append(f"Lead: {task.lead.customer_name}")
     if facts:
         bits.append(" · ".join(facts))
-    bits.append(f"Assigned by: {actor.get_full_name() or actor.username}")
+    who = actor.get_full_name() or actor.username
+    bits.append(f"Assigned by: {who} · {timezone.localtime():%d %b %Y, %I:%M %p}")
     notify(
         task.assigned_to, "task_assigned",
-        f"Task assigned: {task.title}"[:200],
+        f"Task assigned by {who}: {task.title}"[:200],
         "\n".join(bits),
         link="/tasks",
     )
@@ -100,7 +101,8 @@ def _notify_task_completed(task, actor):
     took = f" — took {task.actual_minutes}m" if task.actual_minutes else ""
     assigned = f" (assigned {task.effort_minutes}m)" if task.effort_minutes else ""
     body = (f"{task.code} · {task.title}\nCompleted by "
-            f"{actor.get_full_name() or actor.username}{took}{assigned}."
+            f"{actor.get_full_name() or actor.username} on "
+            f"{timezone.localtime():%d %b %Y, %I:%M %p}{took}{assigned}."
             + (f"\nNote: {task.completion_note[:200]}" if task.completion_note else ""))
     targets = {task.created_by, task.assigned_to}
     targets.update(task.subscribers.all())
