@@ -720,3 +720,29 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
   .steps-add { flex-direction: column; }
   .steps-add .btn { width: 100%; }
 }
+
+/* ---------- Reports: one table shape for every tab ---------- */
+.score-ring {
+  display: inline-grid; place-items: center; border-radius: 50%; flex-shrink: 0;
+}
+.score-ring-in {
+  width: 74%; height: 74%; border-radius: 50%; background: var(--surface);
+  display: grid; place-items: center;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 700;
+}
+.report-table td { white-space: nowrap; }
+.report-table th:first-child, .report-table td:first-child { white-space: normal; min-width: 150px; }
+.report-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 12px; }
+.report-tabs .seg-btn { border-radius: 999px; }
+.who-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.who-chip {
+  display: flex; align-items: center; gap: 7px; border: 1px solid var(--line);
+  background: var(--surface); border-radius: 999px; padding: 5px 12px 5px 5px;
+  font-size: 13px; font-weight: 600; box-shadow: var(--shadow);
+}
+.who-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.who-chip .av {
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 800; flex-shrink: 0;
+}
+.who-chip .n { font-family: 'IBM Plex Mono', monospace; color: var(--muted); }

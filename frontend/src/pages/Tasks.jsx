@@ -75,8 +75,9 @@ export default function Tasks() {
     ['subscribed', 'Subscribed'],
     ['requests', inboxCount > 0 ? `Requests (${inboxCount})` : 'Requests'],
     ['templates', 'Templates'], ['directory', 'Template Directory'],
-    ['activities', 'Activities'], ['time', 'Time Report'],
-    ...(isManager ? [['employees', 'Employees'], ['disputes', 'Disputes']] : []),
+    ['activities', 'Activities'],
+    ...(isManager ? [['employees', 'Reports'], ['time', 'Time Report'],
+                     ['disputes', 'Disputes']] : [['time', 'Time Report']]),
     ...(isAdmin ? [['deleted', 'Deleted']] : []),
   ]
 
@@ -151,6 +152,62 @@ const TILE_PRESETS = {
   completed: { tab: 'done' },
   in_time: { tab: 'done' },
   delayed: { tab: 'done' },
+}
+
+/* One score, drawn the same way everywhere: a ring you can read at a glance
+   instead of hunting for a number in a column. */
+function ScoreRing({ value, size = 34 }) {
+  const pct = Math.max(0, Math.min(100, Number(value) || 0))
+  const colour = value == null ? 'var(--line)'
+    : pct >= 75 ? 'var(--accent)' : pct >= 45 ? '#b45309' : 'var(--red)'
+  return (
+    <span className="score-ring" style={{
+      width: size, height: size,
+      background: `conic-gradient(${colour} ${pct * 3.6}deg, var(--line) 0)`,
+    }} title={value == null ? 'Nothing scored yet' : `${pct}% on time`}>
+      <span className="score-ring-in">{value == null ? '—' : Math.round(pct)}</span>
+    </span>
+  )
+}
+
+/* Every report tab renders THIS table — same columns, same order, so moving
+   between Employees / Monthly / Groups needs no re-reading. */
+function ReportTable({ rows, firstColumn, firstCell, extraHead, extraCell, empty }) {
+  const pct = (n, d) => (d ? `${Math.round((100 * n) / d)}%` : '—')
+  if (!rows?.length) return <p className="muted">{empty || 'Nothing in this range.'}</p>
+  return (
+    <div className="tablewrap">
+      <table className="table report-table">
+        <thead>
+          <tr>
+            <th>{firstColumn}</th><th>Total</th><th>Score</th>
+            <th>Overdue</th><th>Pending</th><th>In-Progress</th>
+            <th>In Time</th><th>Delayed</th>
+            {extraHead}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.user ?? r.month ?? r.group ?? r.category ?? i}>
+              <td>{firstCell(r)}</td>
+              <td>{r.total}</td>
+              <td><ScoreRing value={r.score} /></td>
+              <td className={r.overdue ? 'late' : ''}>
+                {r.overdue} <span className="muted small">({pct(r.overdue, r.total)})</span>
+              </td>
+              <td>{r.pending} <span className="muted small">({pct(r.pending, r.total)})</span></td>
+              <td>{r.in_progress} <span className="muted small">({pct(r.in_progress, r.total)})</span></td>
+              <td className="ok">{r.in_time} <span className="muted small">({pct(r.in_time, r.completed)})</span></td>
+              <td className={r.delayed ? 'late' : ''}>
+                {r.delayed} <span className="muted small">({pct(r.delayed, r.completed)})</span>
+              </td>
+              {extraCell?.(r)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 function TaskDashboard({ onTileClick }) {
@@ -1086,13 +1143,19 @@ function Activities({ people = [] }) {
     const id = setTimeout(() => setDebounced(search.trim()), 300)
     return () => clearTimeout(id)
   }, [search])
+  const [counts, setCounts] = useState([])
+
   const load = useCallback(() => {
     const p = new URLSearchParams({ page_size: '100' })
     if (days) p.set('days', days)
     if (who) p.set('assigned_to', who)
-    if (actor) p.set('actor', actor)
     if (debounced) p.set('search', debounced)
-    api(`/api/task-activities/?${p}`).then(d => setRows(d.results || d)).catch(e => setErr(e.message))
+    const withActor = new URLSearchParams(p)
+    if (actor) withActor.set('actor', actor)
+    api(`/api/task-activities/?${withActor}`)
+      .then(d => setRows(d.results || d)).catch(e => setErr(e.message))
+    // the chips deliberately ignore the actor filter — they ARE the actor picker
+    api(`/api/task-activities/counts/?${p}`).then(setCounts).catch(() => {})
   }, [days, who, actor, debounced])
   useEffect(() => { load() }, [load])
 
@@ -1123,6 +1186,23 @@ function Activities({ people = [] }) {
             onClick={() => { setWho(''); setActor(''); setSearch('') }}>Clear</button>
         )}
       </div>
+      {counts.length > 0 && (
+        <div className="who-chips">
+          {counts.map(c => {
+            const initials = c.name.split(' ').filter(Boolean).slice(0, 2)
+              .map(w => w[0]).join('').toUpperCase()
+            const on = String(actor) === String(c.user)
+            return (
+              <button key={c.user} className={'who-chip' + (on ? ' on' : '')}
+                title={on ? `Showing only ${c.name} — click to clear` : `Show only ${c.name}`}
+                onClick={() => setActor(on ? '' : String(c.user))}>
+                <span className="av">{initials}</span>
+                {c.name}<span className="n">{c.count}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       {err && <div className="err">{err}</div>}
       {rows.length === 0 && <p className="muted">No task activity in this window.</p>}
       <div className="dash-card" style={{ maxWidth: 720 }}>
@@ -1229,123 +1309,113 @@ const downloadCSV = (filename, header, rows) => {
   URL.revokeObjectURL(a.href)
 }
 
+const REPORT_TABS = [
+  ['person', 'Employees'], ['category', 'Categories'], ['mine', 'My Report'],
+  ['delegated', 'Delegated'], ['daily', 'Daily'], ['monthly', 'Monthly'],
+  ['overdue', 'OverDue'], ['group', 'Groups'],
+]
+
+/* Every report in one place, all reading the same table. Previously these
+   lived across three separate tabs with three different column sets. */
 function EmployeesReport() {
+  const { user, can } = useAuth()
+  const [tab, setTab] = useState('person')
   const [range, setRange] = useState('this_month')
   const [custom, setCustom] = useState({ start: '', end: '' })
-  const [grain, setGrain] = useState('person')     // person | daily
   const [data, setData] = useState(null)
-  const [person, setPerson] = useState(null)       // slide-over
+  const [person, setPerson] = useState(null)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     if (range === 'custom' && (!custom.start || !custom.end)) return
+    setData(null)
     const p = rangeParams(range, custom)
-    if (grain === 'daily') p.set('grain', 'daily')
-    api(`/api/tasks/employees_report/?${p}`)
-      .then(d => { setData(d); setErr('') })
+    // Employees / My Report / Delegated all use the per-person grain; the
+    // rest ask the server for their own grouping.
+    if (!['person', 'mine', 'delegated', 'category'].includes(tab)) p.set('grain', tab)
+    if (tab === 'mine') p.set('user', String(user.id))
+    const url = tab === 'category' || tab === 'delegated'
+      ? `/api/tasks/dashboard/?${p}${tab === 'delegated' ? '&scope=delegated' : ''}`
+      : `/api/tasks/employees_report/?${p}`
+    api(url).then(d => { setData(d); setErr('') })
       .catch(e => setErr(errorText(e.data) || e.message))
-  }, [range, custom, grain])
+  }, [tab, range, custom, user.id])
+
+  const rows = data?.rows || data?.categories || []
 
   const exportCSV = () => {
-    if (grain === 'daily') {
-      downloadCSV(`daily-report-${range}.csv`,
-        ['Date', 'Completed', 'In time', 'Delayed', 'Time earned (min)', 'Time spent (min)'],
-        data.rows.map(r => [r.date, r.completed, r.in_time, r.delayed,
-          r.time_earned_minutes, r.time_spent_minutes]))
-    } else {
-      downloadCSV(`employees-report-${range}.csv`,
-        ['Person', 'Score', 'Total', 'Self-assigned (not scored)', 'Scored completions',
-          'Overdue', 'Pending', 'In progress', 'Completed',
-          'In time', 'Delayed', 'Time assigned (min)', 'Time earned (min)',
-          'Time spent (min)', 'Multitask days'],
-        data.rows.map(r => [r.name, r.score ?? '', r.total, r.self_assigned ?? 0,
-          r.scored_completed ?? 0, r.overdue, r.pending,
-          r.in_progress, r.completed, r.in_time, r.delayed, r.time_assigned_minutes,
-          r.time_earned_minutes, r.time_spent_minutes, r.multitask_days]))
-    }
+    const head = ['Name', 'Total', 'Score', 'Overdue', 'Pending', 'In progress',
+                  'Completed', 'In time', 'Delayed']
+    downloadCSV(`report-${tab}-${range}.csv`, head, rows.map(r => [
+      r.name || r.label || r.group || r.category, r.total, r.score ?? '',
+      r.overdue, r.pending, r.in_progress, r.completed, r.in_time, r.delayed]))
   }
 
-  if (err) return <div className="err">{err}</div>
-  if (!data) return <div className="center-note">Loading report…</div>
-  const pct = (n, d) => d ? `${Math.round(100 * n / d)}%` : '—'
+  const firstCell = (r) => {
+    if (tab === 'monthly') return <strong>{r.label}</strong>
+    if (tab === 'group') return <strong>{r.group}</strong>
+    if (tab === 'category') return <strong>{r.category}</strong>
+    return (
+      <>
+        <button className="link-name" title="Open this person's full profile"
+          onClick={() => setPerson({ user: r.user, name: r.name })}>{r.name}</button>
+        {r.self_assigned > 0 && (
+          <span className="ai-chip" title="Created for themselves — not scored">
+            {r.self_assigned} self-assigned
+          </span>
+        )}
+        {r.review && <div className="muted small">💡 {r.review}</div>}
+      </>
+    )
+  }
 
   return (
     <div>
+      <div className="report-tabs">
+        {REPORT_TABS.map(([v, l]) => (
+          <button key={v} className={'seg-btn' + (tab === v ? ' on' : '')}
+            onClick={() => setTab(v)}>{l}</button>
+        ))}
+      </div>
       <RangePicker range={range} setRange={setRange} custom={custom} setCustom={setCustom} />
       <div className="filters">
-        <div className="seg">
-          <button className={'seg-btn' + (grain === 'person' ? ' on' : '')}
-            onClick={() => setGrain('person')}>Per person</button>
-          <button className={'seg-btn' + (grain === 'daily' ? ' on' : '')}
-            onClick={() => setGrain('daily')}>Daily</button>
-        </div>
         <span style={{ flex: 1 }} />
-        {data.rows?.length > 0 && (
+        {rows.length > 0 && (
           <button className="btn btn-sm" onClick={exportCSV}>⬇ Export CSV</button>
         )}
       </div>
-      {data.formula && grain === 'person' && (
-        <p className="muted small">Formula (open, not a black box): <strong>{data.formula}</strong>.
-          Tasks with no effort value earn 0 — set effort while assigning.</p>
-      )}
-      {(!data.rows || data.rows.length === 0) && <p className="muted">No tasks in this range.</p>}
+      {err && <div className="err">{err}</div>}
+      {!data && !err && <p className="muted">Loading…</p>}
 
-      {grain === 'daily' && data.rows?.length > 0 && (
-        <table className="table" style={{ maxWidth: 720 }}>
-          <thead><tr><th>Date</th><th>Completed</th><th>In time</th><th>Delayed</th><th>Time Earned</th><th>Time Spent</th></tr></thead>
-          <tbody>
-            {data.rows.map(r => (
-              <tr key={r.date}>
-                <td><strong>{new Date(r.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</strong></td>
-                <td>{r.completed}</td><td className="ok">{r.in_time}</td>
-                <td className={r.delayed ? 'late' : ''}>{r.delayed}</td>
-                <td>{fmtEffort(r.time_earned_minutes) || '0m'}</td>
-                <td>{fmtEffort(r.time_spent_minutes) || '0m'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {data && tab === 'daily' && (
+        <ReportTable rows={rows.map(r => ({ ...r, total: r.completed }))}
+          firstColumn="Date" empty="Nothing completed in this range."
+          firstCell={r => <strong>{new Date(r.date + 'T00:00:00')
+            .toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</strong>} />
+      )}
+      {data && tab === 'overdue' && (
+        <ReportTable rows={rows} firstColumn="Employee"
+          empty="Nobody is overdue right now. 🎉"
+          firstCell={firstCell}
+          extraHead={<th>Overdue Since</th>}
+          extraCell={r => (
+            <td className="late">
+              {r.days_overdue === 0 ? 'today'
+                : r.days_overdue < 30 ? `${r.days_overdue} days ago`
+                : `${Math.round(r.days_overdue / 30)} month(s) ago`}
+            </td>
+          )} />
+      )}
+      {data && !['daily', 'overdue'].includes(tab) && (
+        <ReportTable rows={rows} firstCell={firstCell}
+          firstColumn={{ monthly: 'Month', group: 'Group', category: 'Category' }[tab] || 'Employee'}
+          empty={tab === 'mine' ? 'You have no tasks in this range.' : undefined} />
       )}
 
-      {grain === 'person' && data.rows?.length > 0 && (
-        <table className="table">
-          <thead>
-            <tr><th>Person</th><th>Score</th><th>Total</th><th>Overdue</th><th>Pending</th>
-              <th>In prog.</th><th>Done</th><th>In time</th><th>Delayed</th>
-              <th>Earned</th><th>Spent</th></tr>
-          </thead>
-          <tbody>
-            {data.rows.map(r => (
-              <tr key={r.user} style={{ cursor: 'pointer' }} onClick={() => setPerson(r)}>
-                <td>
-                  <strong>{r.name}</strong>
-                  {r.multitask_days >= 3 && (r.multitask_on_time ?? 0) >= 70 && (
-                    <span className="ai-chip" title={`${r.multitask_days} days with 3+ parallel tasks, ${r.multitask_on_time}% of them finished on time`}>🤹 Multitasker</span>
-                  )}
-                  {r.self_assigned > 0 && (
-                    <span className="ai-chip"
-                      title={`${r.self_assigned} task(s) this person created for themselves — not scored`}>
-                      {r.self_assigned} self-assigned
-                    </span>
-                  )}
-                  {r.review && <div className="muted small">💡 {r.review}</div>}
-                </td>
-                <td title={`${data.formula}\nOn-time: ${r.on_time_rate ?? '—'}% · Effort earned: ${r.effort_ratio ?? '—'}%\nTask score ${r.task_score ?? '—'} − mistakes ${r.mistake_penalty ?? 0} (${r.mistakes ?? 0} logged, ${r.repeat_mistakes ?? 0} repeat)`}>
-                  <strong>{r.score ?? '—'}</strong>
-                  {r.mistake_penalty > 0 && <div className="small late">−{r.mistake_penalty} mistakes</div>}
-                </td>
-                <td>{r.total}</td>
-                <td className={r.overdue ? 'late' : ''}>{r.overdue}</td>
-                <td>{r.pending}</td><td>{r.in_progress}</td>
-                <td className="ok">{r.completed} ({pct(r.completed, r.total)})</td>
-                <td>{r.in_time} ({pct(r.in_time, r.completed)})</td>
-                <td className={r.delayed ? 'late' : ''}>{r.delayed} ({pct(r.delayed, r.completed)})</td>
-                <td>{fmtEffort(r.time_earned_minutes) || '0m'}</td>
-                <td>{fmtEffort(r.time_spent_minutes) || '0m'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {data?.formula && ['person', 'mine'].includes(tab) && (
+        <p className="muted small" style={{ marginTop: 10 }}>
+          Formula (open, not a black box): <strong>{data.formula}</strong>.
+        </p>
       )}
       {person && (
         <PersonProfile userId={person.user} name={person.name}
@@ -1354,6 +1424,7 @@ function EmployeesReport() {
     </div>
   )
 }
+
 
 /* ================= Effort disputes (D5) ================= */
 

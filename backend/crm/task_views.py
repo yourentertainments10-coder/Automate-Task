@@ -1,7 +1,7 @@
 from collections import Counter
 from datetime import timedelta
 
-from django.db.models import F, Q
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from rest_framework import status as http, viewsets
 from rest_framework.decorators import action
@@ -921,7 +921,9 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         raw = Task.objects.filter(assigned_to__in=users, deleted_at__isnull=True) \
             .values("assigned_to_id", "created_by_id", "status", "due_at",
-                    "completed_at", "created_at", "effort_minutes", "actual_minutes")
+                    "completed_at", "created_at", "effort_minutes", "actual_minutes",
+                    "group__name")
+        users_by_id = {u.pk: u for u in users}
         per = {u.pk: [] for u in users}
         for t in raw:
             anchor = timezone.localtime(t["due_at"] or t["created_at"]).date()
@@ -946,6 +948,64 @@ class TaskViewSet(viewsets.ModelViewSet):
                     row["time_earned_minutes"] += t["effort_minutes"] or 0
                     row["time_spent_minutes"] += t["actual_minutes"] or 0
             return Response({"rows": sorted(days.values(), key=lambda r: r["date"], reverse=True)})
+
+        def tally(subset):
+            """The six numbers every report table shows, so Monthly, Groups
+            and OverDue all read the same as the Employees table."""
+            c = Counter()
+            for t in subset:
+                if t["status"] != TaskStatus.DONE and t["due_at"] and t["due_at"] < now:
+                    c["overdue"] += 1
+                if t["status"] == TaskStatus.OPEN:
+                    c["pending"] += 1
+                elif t["status"] == TaskStatus.IN_PROGRESS:
+                    c["in_progress"] += 1
+                else:
+                    c["completed"] += 1
+                    late = (t["due_at"] and t["completed_at"]
+                            and t["completed_at"] > t["due_at"])
+                    c["delayed" if late else "in_time"] += 1
+            done = c.get("completed", 0)
+            return {"total": len(subset),
+                    **{k: c.get(k, 0) for k in ("overdue", "pending", "in_progress",
+                                                "completed", "in_time", "delayed")},
+                    "score": round(100 * c.get("in_time", 0) / done, 1) if done else None}
+
+        if p.get("grain") == "monthly":
+            months = {}
+            for sub in per.values():
+                for t in sub:
+                    d = timezone.localtime(t["due_at"] or t["created_at"]).date()
+                    months.setdefault(d.replace(day=1), []).append(t)
+            return Response({"rows": [
+                {"month": m.isoformat(), "label": m.strftime("%b %Y"), **tally(sub)}
+                for m, sub in sorted(months.items(), reverse=True)]})
+
+        if p.get("grain") == "group":
+            groups = {}
+            for sub in per.values():
+                for t in sub:
+                    groups.setdefault(t["group__name"] or "No group", []).append(t)
+            return Response({"rows": [
+                {"group": g, **tally(sub)}
+                for g, sub in sorted(groups.items(), key=lambda kv: kv[0].lower())]})
+
+        if p.get("grain") == "overdue":
+            # Who is sitting on late work, and how long the OLDEST one has been
+            # late -- "4 months ago" is what starts a conversation, not the count.
+            rows = []
+            for uid, sub in per.items():
+                late = [t for t in sub if t["status"] != TaskStatus.DONE
+                        and t["due_at"] and t["due_at"] < now]
+                if not late:
+                    continue
+                oldest = min(t["due_at"] for t in late)
+                who = users_by_id[uid]
+                rows.append({"user": uid, "name": who.get_full_name() or who.username,
+                             "oldest_due_at": oldest,
+                             "days_overdue": (now - oldest).days, **tally(sub)})
+            rows.sort(key=lambda r: -r["days_overdue"])
+            return Response({"rows": rows})
 
         name_of = {u.pk: (u.get_full_name() or u.username) for u in users}
         single = bool(p.get("user"))   # one person's profile: always emit a row
@@ -1640,6 +1700,23 @@ class TaskActivityViewSet(viewsets.ReadOnlyModelViewSet):
             except ValueError:
                 pass
         return qs
+
+
+    @action(detail=False, methods=["get"])
+    def counts(self, request):
+        """Who has been active, and how much — the chips above the feed.
+        Uses exactly the same filters as the list, so the numbers always
+        match what the feed below is showing."""
+        rows = (self.filter_queryset(self.get_queryset())
+                .values("actor_id", "actor__first_name", "actor__last_name",
+                        "actor__username")
+                .annotate(n=Count("id")).order_by("-n")[:25])
+        return Response([{
+            "user": r["actor_id"],
+            "name": (f"{r['actor__first_name'] or ''} {r['actor__last_name'] or ''}".strip()
+                     or r["actor__username"] or "System"),
+            "count": r["n"],
+        } for r in rows if r["actor_id"]])
 
 
 class HolidayViewSet(viewsets.ModelViewSet):
