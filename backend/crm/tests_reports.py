@@ -23,7 +23,7 @@ class EmployeesReportTests(Base):
         mk(self.rahul, self.manager, effort_minutes=30,
            due_at=now + timedelta(days=1))                               # open
         self.as_(self.manager)
-        res = self.client.get("/api/tasks/employees_report/?range=this_week").data
+        res = self.client.get("/api/tasks/employees_report/?range=all").data
         self.assertIn("Score = 60", res["formula"])
         row = next(r for r in res["rows"] if r["user"] == self.rahul.id)
         self.assertEqual(row["total"], 3)

@@ -25,12 +25,20 @@ class ChecklistTests(Base):
         self.client.post(f"/api/tasks/{self.task.id}/add_check/",
                          {"text": "Verify prices"}, format="json")
         item = self.task.checklist.first()
-        res = self.client.post(f"/api/tasks/{self.task.id}/check/{item.id}/")
+        # a bare tick is refused — every step has to say what was done
+        self.assertEqual(self.client.post(
+            f"/api/tasks/{self.task.id}/check/{item.id}/").status_code, 400)
+        res = self.client.post(f"/api/tasks/{self.task.id}/check/{item.id}/",
+                               {"note": "collected them"}, format="json")
         self.assertTrue(next(i for i in res.data if i["id"] == item.id)["done"])
         # completion is logged to the feed
         self.assertTrue(self.task.activities.filter(
-            text__startswith="Checklist ✓").exists())
-        res = self.client.post(f"/api/tasks/{self.task.id}/check/{item.id}/?delete=true")
+            text__startswith="Step done:").exists())
+        # a finished step stays: only an open one can be removed
+        self.assertEqual(self.client.post(
+            f"/api/tasks/{self.task.id}/check/{item.id}/?delete=true").status_code, 400)
+        other = self.task.checklist.filter(done=False).first()
+        res = self.client.post(f"/api/tasks/{self.task.id}/check/{other.id}/?delete=true")
         self.assertEqual(len(res.data), 1)
 
     def test_outsider_cannot_edit_checklist(self):

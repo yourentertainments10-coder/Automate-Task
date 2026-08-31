@@ -13,7 +13,7 @@ classify(text, sender_name) -> dict with a FIXED shape either way:
     }
 
 Claude (Anthropic Messages API over plain REST) runs when AI_ENABLED=true
-and ANTHROPIC_API_KEY is set; anything else -- including a Claude error or
+and an API key is set; anything else -- including a provider error or
 malformed reply -- falls back to the deterministic keyword classifier, so
 the pipeline NEVER blocks on the AI layer.
 """
@@ -23,6 +23,8 @@ import os
 import re
 
 import requests
+
+from config import llm
 
 log = logging.getLogger(__name__)
 
@@ -42,45 +44,16 @@ Reply with ONLY a JSON object, no prose, using exactly this shape:
 Rules: parts requests/price asks => intent purchase, department sales. Complaints/warranty/delivery/product issues => intent support, department sales (there is no customer-support team; the sales team handles product support). Technical/system/software/website issues => department support (the IT team). Payment/invoice queries => accounts. Promotions/irrelevant => spam. "urgent"/"immediately"/"breakdown" => priority high or urgent."""
 
 
-def _claude_enabled() -> bool:
-    return (
-        os.environ.get("AI_ENABLED", "false").lower() == "true"
-        and bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+
+def _classify_ai(text: str, sender_name: str) -> dict | None:
+    data = llm.chat_json(
+        SYSTEM_PROMPT,
+        f"Sender name: {sender_name or 'unknown'}"
+        + "\n"
+        + f"Message:\n{text[:4000]}",
+        max_tokens=500,
     )
-
-
-def _classify_claude(text: str, sender_name: str) -> dict | None:
-    try:
-        res = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5"),
-                "max_tokens": 500,
-                "system": SYSTEM_PROMPT,
-                "messages": [{
-                    "role": "user",
-                    "content": f"Sender name: {sender_name or 'unknown'}\nMessage:\n{text[:4000]}",
-                }],
-            },
-            timeout=int(os.environ.get("AI_TIMEOUT_SECONDS", "20")),
-        )
-        if res.status_code != 200:
-            log.warning("Claude API %s: %s", res.status_code, res.text[:300])
-            return None
-        reply = "".join(b.get("text", "") for b in res.json().get("content", []))
-        match = re.search(r"\{.*\}", reply, re.DOTALL)
-        if not match:
-            return None
-        data = json.loads(match.group(0))
-        return _normalize(data, provider="claude")
-    except (requests.RequestException, json.JSONDecodeError, KeyError) as exc:
-        log.warning("Claude classify failed: %s", exc)
-        return None
+    return _normalize(data, provider=llm.provider()) if data else None
 
 
 # --- deterministic fallback ------------------------------------------------
@@ -164,8 +137,8 @@ def _normalize(data: dict, provider: str) -> dict:
 
 
 def classify(text: str, sender_name: str = "") -> dict:
-    if _claude_enabled():
-        result = _classify_claude(text, sender_name)
+    if llm.enabled():
+        result = _classify_ai(text, sender_name)
         if result:
             return result
     return _classify_rules(text, sender_name)

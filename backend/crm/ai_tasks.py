@@ -1,17 +1,15 @@
-"""E3: AI layer for tasks — Claude behind AI_ENABLED, deterministic fallback
-ALWAYS works (same contract as intake.ai: the app never blocks on AI).
+"""E3: AI layer for tasks — any provider behind AI_ENABLED, deterministic
+fallback ALWAYS works (the app never blocks on AI).
 
   draft_task(prompt)          -> {"title", "description", "checklist", "provider"}
   summarize_task(task, feed)  -> {"summary", "provider"}
   review_sentence(stats)      -> str  (pure rules — Sir's categories, so the
                                  no-API-key install says the same things)
 """
-import json
 import logging
-import os
 import re
 
-import requests
+from config import llm
 
 log = logging.getLogger(__name__)
 
@@ -26,51 +24,20 @@ Reply with ONLY a JSON object: {"summary": "<3-5 short sentences: what the task 
 where it stands, what happened recently, what should happen next>"}"""
 
 
-def _claude_enabled() -> bool:
-    return (os.environ.get("AI_ENABLED", "false").lower() == "true"
-            and bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()))
-
-
-def _claude_json(system: str, user: str) -> dict | None:
-    try:
-        res = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5"),
-                "max_tokens": 700,
-                "system": system,
-                "messages": [{"role": "user", "content": user[:6000]}],
-            },
-            timeout=int(os.environ.get("AI_TIMEOUT_SECONDS", "20")),
-        )
-        if res.status_code != 200:
-            log.warning("Claude API %s: %s", res.status_code, res.text[:200])
-            return None
-        reply = "".join(b.get("text", "") for b in res.json().get("content", []))
-        match = re.search(r"\{.*\}", reply, re.DOTALL)
-        return json.loads(match.group(0)) if match else None
-    except Exception:  # noqa: BLE001 -- AI must never break the feature
-        log.exception("Claude draft/summarize failed")
-        return None
 
 
 # ---------------------------------------------------------------------------
 
 def draft_task(prompt: str) -> dict:
     prompt = (prompt or "").strip()
-    if _claude_enabled():
-        data = _claude_json(DRAFT_SYSTEM, prompt)
+    if llm.enabled():
+        data = llm.chat_json(DRAFT_SYSTEM, prompt)
         if data and data.get("title"):
             return {
                 "title": str(data["title"])[:200],
                 "description": str(data.get("description", ""))[:2000],
                 "checklist": [str(s)[:200] for s in (data.get("checklist") or [])][:8],
-                "provider": "claude",
+                "provider": llm.provider(),
             }
     # deterministic fallback: first sentence -> title, steps split on
     # newlines / "then" / commas / "aur"
@@ -86,15 +53,15 @@ def draft_task(prompt: str) -> dict:
 
 def summarize_task(task, feed) -> dict:
     lines = [f"{a.created_at:%d %b}: {a.text}" for a in feed[:15]]
-    if _claude_enabled():
-        data = _claude_json(SUMMARY_SYSTEM, (
+    if llm.enabled():
+        data = llm.chat_json(SUMMARY_SYSTEM, (
             f"Task {task.code}: {task.title}\nStatus: {task.status} · "
             f"Priority: {task.priority} · Due: {task.due_at or '—'}\n"
             f"Assigned to: {task.assigned_to}\nDescription: {task.description[:500]}\n"
             f"Progress: {task.progress_percent or 0}% · effort {task.effort_minutes or '?'}m "
             f"assigned, {task.actual_minutes or 0}m spent\nRecent history:\n" + "\n".join(lines)))
         if data and data.get("summary"):
-            return {"summary": str(data["summary"])[:1500], "provider": "claude"}
+            return {"summary": str(data["summary"])[:1500], "provider": llm.provider()}
     parts = [f"{task.code} “{task.title}” is {task.get_status_display().lower()}"
              + (f", {task.progress_percent}% done" if task.progress_percent else "") + "."]
     if task.due_at:
