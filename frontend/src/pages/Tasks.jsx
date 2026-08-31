@@ -679,12 +679,28 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
     priority: template?.priority || 'normal', due_at: '', repeat_until: '',
     effort: '', effort_unit: 'minutes',
   })
-  const [assignees, setAssignees] = useState([user.id])  // multi-select: one task per person
+  const [assignees, setAssignees] = useState([])   // nobody pre-picked — see the note in submit()
   const [categories, setCategories] = useState([])
   const [inLoop, setInLoop] = useState([])          // Loop: colleagues who follow the task
   const [workloads, setWorkloads] = useState([])    // C1: pipeline per picked assignee
   const [aiPrompt, setAiPrompt] = useState(null)    // E3: null = closed
-  const [aiChecklist, setAiChecklist] = useState([])
+  // The assigner breaks the task into steps here; the assignee ticks them
+  // off one by one and cannot complete the task until all are done.
+  const [steps, setSteps] = useState([])
+  const [stepDraft, setStepDraft] = useState('')
+  const addStep = () => {
+    const t = stepDraft.trim()
+    if (!t) return
+    setSteps(prev => [...prev, t].slice(0, 30))
+    setStepDraft('')
+  }
+  const moveStep = (i, by) => setSteps(prev => {
+    const next = [...prev]
+    const j = i + by
+    if (j < 0 || j >= next.length) return prev
+    ;[next[i], next[j]] = [next[j], next[i]]
+    return next
+  })
   const [aiBusy, setAiBusy] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -696,7 +712,7 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
     try {
       const d = await api('/api/tasks/ai_draft/', { method: 'POST', body: { prompt: aiPrompt } })
       setF(prev => ({ ...prev, title: d.title, description: d.description }))
-      setAiChecklist(d.checklist || [])
+      setSteps(prev => [...prev, ...(d.checklist || [])].slice(0, 30))
       setAiPrompt(null)
     } catch (ex) { setErr(errorText(ex.data) || ex.message) }
     finally { setAiBusy(false) }
@@ -737,19 +753,22 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
       repeat_until: f.frequency !== 'one_time' && f.repeat_until ? f.repeat_until : null,
       effort_minutes: effort,
     }
+    if (!assignees.length) {
+      setErr('Pick who this task is for — nobody is selected by default.')
+      setBusy(false)
+      return
+    }
     // one INDIVIDUAL task per picked assignee — each completes their own
     let created = 0
     try {
       for (const id of assignees) {
-        const made = await api('/api/tasks/', {
+        await api('/api/tasks/', {
           method: 'POST',
-          body: { ...base, assigned_to: id, in_loop: inLoop.filter(x => x !== id) },
+          body: {
+            ...base, assigned_to: id, checklist: steps,
+            in_loop: inLoop.filter(x => x !== id),
+          },
         })
-        // E3: the AI-drafted checklist lands on every created task
-        for (const step of aiChecklist) {
-          await api(`/api/tasks/${made.id}/add_check/`, { method: 'POST', body: { text: step } })
-            .catch(() => {})
-        }
         created += 1
       }
       onSaved()
@@ -761,7 +780,7 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
 
   return (
     <div className="modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <form className="modal-card" onSubmit={submit}>
+      <form className="modal-card task-form" onSubmit={submit}>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {template ? `New task from "${template.name}"` : 'Add Task'}
           <span style={{ flex: 1 }} />
@@ -779,14 +798,46 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
               onClick={aiDraft}>{aiBusy ? '…' : 'Generate'}</button>
           </div>
         )}
-        {aiChecklist.length > 0 && (
-          <p className="small muted" style={{ marginBottom: 8 }}>
-            ✨ Checklist draft ({aiChecklist.length} steps) will be added to the task:
-            {' '}{aiChecklist.join(' · ')}
-            <button type="button" className="btn btn-sm" style={{ marginLeft: 6 }}
-              onClick={() => setAiChecklist([])}>✕</button>
-          </p>
-        )}
+        <div className="steps-box">
+          <div className="steps-head">
+            <strong>Steps to finish this task</strong>
+            <span className="muted small">
+              {steps.length ? `${steps.length} step${steps.length === 1 ? '' : 's'}`
+                : 'optional — but a big task is easier one step at a time'}
+            </span>
+          </div>
+          {steps.length > 0 && (
+            <ol className="steps-list">
+              {steps.map((s, i) => (
+                <li key={i}>
+                  <span className="steps-text">{s}</span>
+                  <span className="steps-actions">
+                    <button type="button" className="btn btn-sm" title="Move up"
+                      onClick={() => moveStep(i, -1)} disabled={i === 0}>↑</button>
+                    <button type="button" className="btn btn-sm" title="Move down"
+                      onClick={() => moveStep(i, 1)}
+                      disabled={i === steps.length - 1}>↓</button>
+                    <button type="button" className="btn btn-sm" title="Remove"
+                      onClick={() => setSteps(prev => prev.filter((_, k) => k !== i))}>✕</button>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+          <div className="steps-add">
+            <input value={stepDraft} onChange={e => setStepDraft(e.target.value)}
+              placeholder="e.g. Collect the invoice copy from accounts"
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addStep() } }} />
+            <button type="button" className="btn btn-sm btn-primary"
+              disabled={!stepDraft.trim()} onClick={addStep}>+ Add step</button>
+          </div>
+          {steps.length > 0 && (
+            <p className="muted small" style={{ margin: '6px 0 0' }}>
+              The assignee ticks each step with a note on what they did, and can only
+              mark the task complete once every step is done.
+            </p>
+          )}
+        </div>
         <div className="form-grid">
           <div className="wide">
             <label>Title *</label>
@@ -854,6 +905,10 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
             <label>Assign to * (your level &amp; below — each gets their own task)</label>
             <MultiSelect options={team} selected={assignees} onChange={setAssignees}
               placeholder="— pick people —" />
+            {assignees.length === 0 && (
+              <button type="button" className="btn btn-sm" style={{ marginTop: 4 }}
+                onClick={() => setAssignees([user.id])}>Assign to myself</button>
+            )}
           </div>
           {workloads.length > 0 && (
             <div className="wide">

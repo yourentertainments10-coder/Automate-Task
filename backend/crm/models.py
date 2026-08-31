@@ -400,6 +400,12 @@ class TaskChecklistItem(models.Model):
     order = models.PositiveIntegerField(default=0)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL)
+    # Ticking a step records WHAT was done, by whom and when -- a bare tick
+    # proves nothing, and the task cannot be completed until every step has one.
+    note = models.CharField(max_length=300, blank=True, default="")
+    done_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                on_delete=models.SET_NULL, related_name="ticked_steps")
+    done_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["order", "id"]

@@ -377,6 +377,16 @@ class TaskViewSet(viewsets.ModelViewSet):
                 raise PermissionDenied("You can only create tasks in groups you belong to.")
         task = serializer.save(created_by=user)
         task.subscribers.add(user)  # creator follows their own delegation
+        # The person GIVING the task breaks it into steps -- the assignee
+        # ticks them off one by one and cannot finish until all are done.
+        steps = self.request.data.get("checklist") or []
+        if isinstance(steps, list):
+            for i, step in enumerate(steps[:30]):
+                text = str(step).strip()
+                if text:
+                    TaskChecklistItem.objects.create(
+                        task=task, text=text[:200], order=i,
+                        created_by=user)
         # B7: "In-Loop" — colleagues added at creation start following the task
         in_loop = self.request.data.get("in_loop") or []
         if isinstance(in_loop, list):
@@ -441,7 +451,20 @@ class TaskViewSet(viewsets.ModelViewSet):
         updated = serializer.save()
         self._after_status_change(updated, user, old_status, old_assignee, is_admin)
 
+    def _enforce_checklist_done(self, task):
+        """A task built out of steps is finished when the STEPS are finished --
+        you cannot skip to the end and tick the whole thing off."""
+        left = task.checklist.filter(done=False)
+        n = left.count()
+        if n:
+            raise ValidationError({
+                "detail": f"{n} step{'' if n == 1 else 's'} still open — finish the "
+                          "checklist first: " + ", ".join(i.text for i in left[:3])
+                          + ("…" if n > 3 else ""),
+                "needs": "checklist"})
+
     def _enforce_completion_evidence(self, task, remarks="", has_new_file=False):
+        self._enforce_checklist_done(task)
         # P2: a completion description is ALWAYS required now (reviewer's
         # rule) -- the settings toggle only governs the proof attachment.
         if not remarks:
@@ -589,12 +612,28 @@ class TaskViewSet(viewsets.ModelViewSet):
         if not item:
             raise ValidationError({"detail": "Unknown checklist item."})
         if request.query_params.get("delete") == "true":
-            item.delete()
-        else:
-            item.done = not item.done
-            item.save(update_fields=["done"])
             if item.done:
-                act(task, request.user, f"Checklist ✓ {item.text[:120]}")
+                raise ValidationError(
+                    {"detail": "This step is already done — it cannot be removed."})
+            if request.user.id == task.assigned_to_id                     and request.user.id != task.created_by_id                     and not has_capability(request.user, "tasks.view_all"):
+                raise PermissionDenied(
+                    "Only the person who set the steps can remove one.")
+            item.delete()
+        elif item.done:
+            # un-ticking clears the note as well, so it can never go stale
+            item.done, item.note, item.done_by, item.done_at = False, "", None, None
+            item.save(update_fields=["done", "note", "done_by", "done_at"])
+            act(task, request.user, f"Step re-opened: {item.text[:110]}")
+        else:
+            note = str(request.data.get("note", "")).strip()
+            if len(note) < 5:
+                raise ValidationError({
+                    "note": "Say what you did for this step (a few words).",
+                    "needs": "note"})
+            item.done, item.note = True, note[:300]
+            item.done_by, item.done_at = request.user, timezone.now()
+            item.save(update_fields=["done", "note", "done_by", "done_at"])
+            act(task, request.user, f"Step done: {item.text[:90]} - {note[:120]}")
         from .serializers import TaskChecklistItemSerializer
         return Response(TaskChecklistItemSerializer(task.checklist.all(), many=True).data)
 

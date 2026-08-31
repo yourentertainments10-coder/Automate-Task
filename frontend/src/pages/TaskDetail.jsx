@@ -18,6 +18,8 @@ export default function TaskDetailPanel({ taskId, user, team, settings, onClose,
   const [newCheck, setNewCheck] = useState('')
   const [summary, setSummary] = useState(null)
   const [modal, setModal] = useState(null)       // progress | complete | request
+  const [ticking, setTicking] = useState(null)  // the step being ticked
+  const [stepNote, setStepNote] = useState('')  // "what did you do" for that step
   const [err, setErr] = useState('')
 
   const load = useCallback(() => {
@@ -39,6 +41,7 @@ export default function TaskDetailPanel({ taskId, user, team, settings, onClose,
   const isAssignee = t?.assigned_to === user.id
   const canAct = t && t.status !== 'done'
   const doneChecks = t?.checklist?.filter(c => c.done).length ?? 0
+  const openSteps = (t?.checklist?.length ?? 0) - doneChecks
 
   return (
     <div className="modal side"
@@ -75,7 +78,11 @@ export default function TaskDetailPanel({ taskId, user, team, settings, onClose,
               {canAct && isAssignee && (
                 <>
                   <button className="btn btn-sm" onClick={() => setModal('progress')}>+ Status update</button>
-                  <button className="btn btn-sm btn-primary" onClick={() => setModal('complete')}>Complete</button>
+                  <button className="btn btn-sm btn-primary" disabled={openSteps > 0}
+                    title={openSteps > 0
+                      ? `Finish the ${openSteps} open step(s) first`
+                      : 'Complete this task'}
+                    onClick={() => setModal('complete')}>Complete</button>
                 </>
               )}
               {canAct && <button className="btn btn-sm" onClick={() => setModal('request')}>
@@ -97,14 +104,57 @@ export default function TaskDetailPanel({ taskId, user, team, settings, onClose,
             <h3 style={{ margin: '14px 0 6px' }}>
               Checklist {t.checklist.length > 0 && <span className="muted small">{doneChecks}/{t.checklist.length}</span>}
             </h3>
+            {openSteps > 0 && (
+              <div className="step-gate" style={{ marginBottom: 8 }}>
+                {openSteps} step{openSteps === 1 ? '' : 's'} left — the task can only be
+                completed once every step is ticked.
+              </div>
+            )}
             {t.checklist.map(c => (
-              <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '3px 0' }}>
-                <input type="checkbox" checked={c.done} onChange={() => post(`check/${c.id}/`, {})} />
-                <span className="small" style={{ flex: 1, textDecoration: c.done ? 'line-through' : 'none' }}>{c.text}</span>
-                <button className="btn btn-sm" style={{ padding: '0 6px' }}
-                  onClick={() => post(`check/${c.id}/?delete=true`, {})}>✕</button>
+              <div key={c.id} className={'step-row' + (c.done ? ' done' : '')}>
+                <input type="checkbox" checked={c.done} style={{ marginTop: 3 }}
+                  title={c.done ? 'Re-open this step' : 'Tick and say what you did'}
+                  onChange={() => (c.done ? post(`check/${c.id}/`, {}) : setTicking(c))} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="small step-label">{c.text}</div>
+                  {c.done && c.note && (
+                    <div className="step-note">
+                      ✓ {c.note}
+                      {c.done_by_name && <> — {c.done_by_name}</>}
+                      {c.done_at && <>, {fmtDT(c.done_at)}</>}
+                    </div>
+                  )}
+                </div>
+                {!c.done && (
+                  <button className="btn btn-sm" title="Remove this step"
+                    onClick={() => post(`check/${c.id}/?delete=true`, {})}>✕</button>
+                )}
               </div>
             ))}
+            {ticking && (
+              <div className="modal" onMouseDown={e => {
+                if (e.target === e.currentTarget) { setTicking(null); setStepNote('') }
+              }}>
+                <div className="modal-card" style={{ width: 460 }}>
+                  <h2 style={{ fontSize: 18 }}>Step done</h2>
+                  <p className="muted small" style={{ margin: '4px 0 10px' }}>{ticking.text}</p>
+                  <label>What did you do? *</label>
+                  <textarea rows={3} value={stepNote} autoFocus
+                    style={{ width: '100%', border: '1px solid var(--line)',
+                             borderRadius: 9, padding: '8px 11px' }}
+                    placeholder="e.g. Collected the invoice copy and filed it under Aug"
+                    onChange={e => setStepNote(e.target.value)} />
+                  <div className="modal-actions">
+                    <button className="btn" onClick={() => { setTicking(null); setStepNote('') }}>Cancel</button>
+                    <button className="btn btn-primary" disabled={stepNote.trim().length < 5}
+                      onClick={async () => {
+                        await post(`check/${ticking.id}/`, { note: stepNote.trim() })
+                        setTicking(null); setStepNote('')
+                      }}>Mark done</button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
               <input placeholder="Add a step…" value={newCheck} style={{ flex: 1 }}
                 onChange={e => setNewCheck(e.target.value)}

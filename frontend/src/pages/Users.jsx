@@ -59,8 +59,8 @@ function Directory() {
   const [viewable, setViewable] = useState(new Set()) // whose task profile I may open
   const [err, setErr] = useState('')
 
-  useEffect(() => { api('/api/team/').then(setRows).catch(e => setErr(e.message)) }, [])
   useEffect(() => {
+    api('/api/team/').then(setRows).catch(e => setErr(e.message))
     api('/api/tasks/people/').then(d => setViewable(new Set(d.map(p => p.id)))).catch(() => {})
   }, [])
 
@@ -147,11 +147,12 @@ function ManageTeam() {
   const [viewable, setViewable] = useState(new Set()) // whose task profile I may open
   const [err, setErr] = useState('')
 
-  const load = () => api('/api/users/?page_size=200').then(d => setRows(d.results || d)).catch(e => setErr(e.message))
-  useEffect(() => { load() }, [])
-  useEffect(() => {
+  const load = () => {
+    api('/api/users/?page_size=200').then(d => setRows(d.results || d)).catch(e => setErr(e.message))
+    // refresh WITH the table: a user added a second ago must be clickable too
     api('/api/tasks/people/').then(d => setViewable(new Set(d.map(p => p.id)))).catch(() => {})
-  }, [])
+  }
+  useEffect(() => { load() }, [])
 
   const managers = useMemo(() =>
     rows.filter(u => ['admin', 'sales_manager', 'hr_manager', 'it_lead',

@@ -117,3 +117,81 @@ class AiFallbackTests(TestCase):
                      format="json")
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["title"])
+
+
+class AssignerChecklistTests(Base):
+    """The person GIVING the task breaks it into steps; the assignee ticks
+    each one with a note and cannot finish until every step is done."""
+
+    def make_task_with_steps(self, steps=("Collect invoice", "Verify amount")):
+        res = self.create_task(self.manager, self.rahul, title="Month close",
+                               checklist=list(steps))
+        self.assertEqual(res.status_code, 201, res.data)
+        return res.data["id"]
+
+    def test_assigner_sets_the_steps_at_creation(self):
+        tid = self.make_task_with_steps()
+        self.as_(self.rahul)
+        steps = self.client.get(f"/api/tasks/{tid}/").data["checklist"]
+        self.assertEqual([s["text"] for s in steps], ["Collect invoice", "Verify amount"])
+        self.assertTrue(all(s["done"] is False for s in steps))
+
+    def test_ticking_a_step_requires_a_note(self):
+        tid = self.make_task_with_steps()
+        self.as_(self.rahul)
+        sid = self.client.get(f"/api/tasks/{tid}/").data["checklist"][0]["id"]
+        res = self.client.post(f"/api/tasks/{tid}/check/{sid}/", {}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("note", res.data)
+
+        res = self.client.post(f"/api/tasks/{tid}/check/{sid}/",
+                               {"note": "Picked it up from accounts"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        step = next(s for s in res.data if s["id"] == sid)
+        self.assertTrue(step["done"])
+        self.assertEqual(step["note"], "Picked it up from accounts")
+        self.assertEqual(step["done_by_name"], self.rahul.get_full_name() or self.rahul.username)
+
+    def test_cannot_complete_while_a_step_is_open(self):
+        tid = self.make_task_with_steps()
+        self.as_(self.rahul)
+        res = self.client.post(f"/api/tasks/{tid}/complete/",
+                               {"remarks": "all done", "actual_minutes": 30}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data.get("needs"), "checklist")
+
+        # tick both, then it goes through
+        for s in self.client.get(f"/api/tasks/{tid}/").data["checklist"]:
+            self.client.post(f"/api/tasks/{tid}/check/{s['id']}/",
+                             {"note": "done properly"}, format="json")
+        res = self.client.post(f"/api/tasks/{tid}/complete/",
+                               {"remarks": "all done", "actual_minutes": 30}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(Task.objects.get(pk=tid).status, "done")
+
+    def test_the_status_dropdown_cannot_skip_the_checklist_either(self):
+        tid = self.make_task_with_steps()
+        self.as_(self.rahul)
+        res = self.client.patch(f"/api/tasks/{tid}/", {"status": "done"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertNotEqual(Task.objects.get(pk=tid).status, "done")
+
+    def test_a_done_step_cannot_be_deleted_and_reopening_clears_the_note(self):
+        tid = self.make_task_with_steps()
+        self.as_(self.rahul)
+        sid = self.client.get(f"/api/tasks/{tid}/").data["checklist"][0]["id"]
+        self.client.post(f"/api/tasks/{tid}/check/{sid}/", {"note": "finished it"}, format="json")
+        self.assertEqual(self.client.post(
+            f"/api/tasks/{tid}/check/{sid}/?delete=true").status_code, 400)
+        res = self.client.post(f"/api/tasks/{tid}/check/{sid}/", {}, format="json")
+        step = next(s for s in res.data if s["id"] == sid)
+        self.assertFalse(step["done"])
+        self.assertEqual(step["note"], "")
+
+    def test_a_task_without_steps_completes_as_before(self):
+        res = self.create_task(self.manager, self.rahul, title="Simple")
+        tid = res.data["id"]
+        self.as_(self.rahul)
+        res = self.client.post(f"/api/tasks/{tid}/complete/",
+                               {"remarks": "nothing to it", "actual_minutes": 5}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)

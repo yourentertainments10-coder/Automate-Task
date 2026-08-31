@@ -173,9 +173,15 @@ class TaskActivitySerializer(serializers.ModelSerializer):
 
 
 class TaskChecklistItemSerializer(serializers.ModelSerializer):
+    done_by_name = serializers.SerializerMethodField()
+
     class Meta:
         model = TaskChecklistItem
-        fields = ["id", "text", "done", "order"]
+        fields = ["id", "text", "done", "order", "note", "done_by_name", "done_at"]
+
+    def get_done_by_name(self, obj):
+        who = obj.done_by
+        return (who.get_full_name() or who.username) if who else None
 
 
 class TaskTemplateSerializer(serializers.ModelSerializer):
