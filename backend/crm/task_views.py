@@ -241,7 +241,9 @@ def _range_bounds(name, now):
         start = today - timedelta(days=today.weekday() + 7)
         return start, start + timedelta(days=6)
     if name == "this_month":
-        return today.replace(day=1), today.replace(day=28) + timedelta(days=10)
+        first = today.replace(day=1)
+        next_first = (first + timedelta(days=32)).replace(day=1)
+        return first, next_first - timedelta(days=1)
     if name == "last_month":
         first_this = today.replace(day=1)
         last_prev = first_this - timedelta(days=1)
@@ -406,7 +408,15 @@ class TaskViewSet(viewsets.ModelViewSet):
                                "You are only following this - it is not assigned to you.",
                                "It shows under Tasks > Subscribed.",
                            ]),
-                           link="/tasks")
+                           link="/tasks",
+                           wa_template=("task_inloop_alert", [
+                               colleague.get_full_name() or colleague.username,
+                               f"{task.code} - {task.title}",
+                               task.assigned_to.get_full_name() or task.assigned_to.username,
+                               user.get_full_name() or user.username,
+                               f"{timezone.localtime(task.due_at):%d %b %Y, %I:%M %p}"
+                               if task.due_at else "Not set",
+                           ]))
         act(task, user, f"Created and assigned to {task.assigned_to.get_full_name() or task.assigned_to.username}")
         if task.lead:
             LeadEvent.objects.create(
@@ -581,7 +591,13 @@ class TaskViewSet(viewsets.ModelViewSet):
                            "",
                            "Open Tasks to reply.",
                        ]),
-                       link="/tasks")
+                       link="/tasks",
+                       wa_template=("task_comment_alert", [
+                           target.get_full_name() or target.username,
+                           who_c,
+                           f"{task.code} - {task.title}",
+                           text[:280],
+                       ]))
         acts = task.activities.select_related("actor")[:100]
         return Response(TaskActivitySerializer(acts, many=True).data,
                         status=http.HTTP_201_CREATED)

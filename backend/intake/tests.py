@@ -30,7 +30,17 @@ def wa_payload(msg_id, sender, text, name="Test Customer"):
     }
 
 
-class RulesClassifierTests(TestCase):
+class AiOffMixin:
+    """The suite must never call a live model: a real AI key in the
+    developer's .env otherwise turns these into flaky network tests."""
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.dict("os.environ", {"AI_ENABLED": "false"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class RulesClassifierTests(AiOffMixin, TestCase):
     def test_spec_example_brake_pad_tata_407(self):
         # The exact example from the requirements document
         r = classify("Need brake pad and oil filter for Tata 407.", "Suresh")
@@ -64,34 +74,65 @@ class RulesClassifierTests(TestCase):
         self.assertEqual(by_name.get("oil filter"), 2)
 
 
-class ClaudeProviderTests(TestCase):
-    @mock.patch.dict("os.environ", {"AI_ENABLED": "true", "ANTHROPIC_API_KEY": "sk-ant-test"})
-    @mock.patch("intake.ai.requests.post")
-    def test_claude_reply_is_used(self, post):
-        post.return_value = mock.Mock(status_code=200, json=lambda: {
-            "content": [{"type": "text", "text": json.dumps({
-                "intent": "purchase", "customer_name": "Suresh Kumar",
-                "vehicle": "Tata 407", "items": [{"name": "Brake Pad", "quantity": None}],
-                "priority": "normal", "department": "sales", "summary": "Brake pads for Tata 407",
-            })}],
-        })
-        r = classify("Need brake pad for Tata 407", "Suresh")
-        self.assertEqual(r["provider"], "claude")
-        self.assertEqual(r["customer_name"], "Suresh Kumar")
-        body = post.call_args.kwargs["json"]
-        self.assertIn("classify", body["system"].lower())
+ANSWER = {
+    "intent": "purchase", "customer_name": "Suresh Kumar",
+    "vehicle": "Tata 407", "items": [{"name": "Brake Pad", "quantity": None}],
+    "priority": "normal", "department": "sales", "summary": "Brake pads for Tata 407",
+}
 
-    @mock.patch.dict("os.environ", {"AI_ENABLED": "true", "ANTHROPIC_API_KEY": "sk-ant-test"})
-    @mock.patch("intake.ai.requests.post")
-    def test_claude_failure_falls_back_to_rules(self, post):
+
+class AiProviderTests(TestCase):
+    """The client is provider-agnostic now: an nvapi- key talks to NVIDIA in
+    the OpenAI format, an sk-ant- key talks to Anthropic in its own."""
+
+    @mock.patch.dict("os.environ", {"AI_ENABLED": "true", "AI_API_KEY": "nvapi-test",
+                                    "AI_PROVIDER": "", "AI_MODEL": ""})
+    @mock.patch("config.llm.requests.post")
+    def test_nvidia_key_uses_the_openai_shape(self, post):
+        post.return_value = mock.Mock(status_code=200, json=lambda: {
+            "choices": [{"message": {"content": json.dumps(ANSWER)}}]})
+        r = classify("Need brake pad for Tata 407", "Suresh")
+        self.assertEqual(r["provider"], "nvidia")
+        self.assertEqual(r["customer_name"], "Suresh Kumar")
+        self.assertIn("integrate.api.nvidia.com", post.call_args.args[0])
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(body["messages"][0]["role"], "system")
+        self.assertIn("classify", body["messages"][0]["content"].lower())
+
+    @mock.patch.dict("os.environ", {"AI_ENABLED": "true", "AI_API_KEY": "sk-ant-test",
+                                    "AI_PROVIDER": "", "AI_MODEL": ""})
+    @mock.patch("config.llm.requests.post")
+    def test_anthropic_key_uses_the_anthropic_shape(self, post):
+        post.return_value = mock.Mock(status_code=200, json=lambda: {
+            "content": [{"type": "text", "text": json.dumps(ANSWER)}]})
+        r = classify("Need brake pad for Tata 407", "Suresh")
+        self.assertEqual(r["provider"], "anthropic")
+        self.assertIn("api.anthropic.com", post.call_args.args[0])
+        self.assertIn("classify", post.call_args.kwargs["json"]["system"].lower())
+
+    @mock.patch.dict("os.environ", {"AI_ENABLED": "true", "AI_API_KEY": "nvapi-test"})
+    @mock.patch("config.llm.requests.post")
+    def test_provider_failure_falls_back_to_rules(self, post):
         post.return_value = mock.Mock(status_code=500, text="boom")
         r = classify("Need brake pad for Tata 407", "")
         self.assertEqual(r["provider"], "rules")
         self.assertEqual(r["intent"], "purchase")
 
+    @mock.patch.dict("os.environ", {"AI_ENABLED": "true", "AI_API_KEY": "nvapi-test"})
+    @mock.patch("config.llm.requests.post")
+    def test_prose_around_the_json_is_tolerated(self, post):
+        """Small models like to think out loud before the JSON."""
+        post.return_value = mock.Mock(status_code=200, json=lambda: {
+            "choices": [{"message": {"content":
+                "Let me think about this." + "\n"
+                + json.dumps(ANSWER)}}]})
+        r = classify("Need brake pad for Tata 407", "Suresh")
+        self.assertEqual(r["customer_name"], "Suresh Kumar")
 
-class PipelineTests(TestCase):
+
+class PipelineTests(AiOffMixin, TestCase):
     def setUp(self):
+        super().setUp()
         self.rahul = make("rahul", Role.SALES_EXECUTIVE)
         self.amit = make("amit", Role.SALES_EXECUTIVE)
         AssignmentRule.objects.create(department="sales", strategy="round_robin",
@@ -142,8 +183,9 @@ class PipelineTests(TestCase):
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
-class WebhookTests(TestCase):
+class WebhookTests(AiOffMixin, TestCase):
     def setUp(self):
+        super().setUp()
         self.rahul = make("rahul", Role.SALES_EXECUTIVE)
         AssignmentRule.objects.create(department="sales", member_ids=[self.rahul.pk])
         # the suite must not depend on the developer's .env: a real
@@ -196,8 +238,9 @@ class WebhookTests(TestCase):
             self.assertEqual(res.status_code, 200)
 
 
-class IntakeApiTests(TestCase):
+class IntakeApiTests(AiOffMixin, TestCase):
     def setUp(self):
+        super().setUp()
         self.client = APIClient()
         self.admin = make("boss", Role.ADMIN, "management")
         self.exec_ = make("neha", Role.SALES_EXECUTIVE)

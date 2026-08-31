@@ -1,11 +1,12 @@
 """CarTrends CRM - Django settings.
 
 Fully independent project. All external services (WhatsApp Cloud API, Gmail
-API, Claude API, Neon Postgres) are configured ONLY via environment variables
-and stay inert until credentials are provided. Nothing is shared with any
-other project.
+API, the AI provider, Neon Postgres) are configured ONLY via environment
+variables and stay inert until credentials are provided. Nothing is shared
+with any other project.
 """
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +15,17 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+
+# The test suite must never reach a real integration. .env holds working
+# WhatsApp/Gmail/AI credentials, and without this the suite would send live
+# messages, spend AI quota, and fail whenever a model worded something
+# differently. Individual tests that DO want the enabled path still switch it
+# on themselves with mock.patch.dict.
+TESTING = "test" in sys.argv
+if TESTING:
+    for flag in ("AI_ENABLED", "WHATSAPP_ENABLED", "GMAIL_ENABLED"):
+        os.environ[flag] = "false"
+    os.environ["WHATSAPP_APP_SECRET"] = ""      # webhook tests post unsigned
 
 def env(name, default=""):
     """Env lookup where a BLANK value in .env means 'unset' -- the

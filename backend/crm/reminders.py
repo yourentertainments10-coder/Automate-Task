@@ -120,7 +120,80 @@ def send_daily_task_digest(force=False) -> int:
             user, "task_daily",
             f"Your tasks today - {len(due_today)} due, {len(overdue)} overdue, {len(tasks)} open"[:200],
             ("\n".join(lines) or "Nothing is due today.") + "\n\nOpen Tasks to work through them.",
+            wa_template=("day_start_digest", [
+                user.get_full_name() or user.username,
+                str(len(due_today)), str(len(overdue)), str(len(tasks)),
+                # one line only: Meta rejects newlines inside a parameter
+                " · ".join(f"{t.code} {t.title[:40]}"
+                           for t in (overdue[:2] + due_today[:2])) or "nothing due",
+            ]),
             link="/tasks",
+        )
+        sent += 1
+    return sent
+
+
+DAY_END_HOUR = int(os.environ.get("DAY_END_DIGEST_HOUR", "19"))   # 7 PM local
+
+
+def send_day_end_digest(force=False) -> int:
+    """The evening counterpart of the morning digest: what you closed today,
+    what is still open, and your score. Score comes from crm.scoring so this
+    message and the Reports page can never disagree."""
+    from notifications.models import Notification
+    from .scoring import score_for
+
+    now = timezone.localtime()
+    if not force and now.hour < DAY_END_HOUR:
+        return 0
+    today = now.date()
+    month_start = today.replace(day=1)
+    next_month = (month_start + timezone.timedelta(days=32)).replace(day=1)
+    month_end = next_month - timezone.timedelta(days=1)
+
+    # everyone with a task that is still open, or that they closed today
+    people = {}
+    for t in (Task.objects.filter(deleted_at__isnull=True)
+              .select_related("assigned_to")):
+        closed_today = (t.status == TaskStatus.DONE and t.completed_at
+                        and timezone.localtime(t.completed_at).date() == today)
+        if t.status != TaskStatus.DONE or closed_today:
+            people.setdefault(t.assigned_to, {"open": [], "done_today": 0})
+            if closed_today:
+                people[t.assigned_to]["done_today"] += 1
+            elif t.status != TaskStatus.DONE:
+                people[t.assigned_to]["open"].append(t)
+
+    sent = 0
+    for user, bucket in people.items():
+        if not user or not user.is_active:
+            continue
+        if Notification.objects.filter(user=user, type="task_day_end",
+                                       created_at__date=today).exists():
+            continue                      # once a day, however often we tick
+        open_tasks = bucket["open"]
+        overdue = sorted((t for t in open_tasks if t.due_at and t.due_at < now),
+                         key=lambda t: t.due_at)
+        stats = score_for(user, month_start, month_end)
+        score = "not scored yet" if stats["score"] is None else f"{stats['score']} / 100"
+        notify(
+            user, "task_day_end",
+            f"Day closing - {bucket['done_today']} done, {len(open_tasks)} pending"[:200],
+            "\n".join([
+                f"Completed today: {bucket['done_today']}",
+                f"Still pending: {len(open_tasks)} (of which {len(overdue)} overdue)",
+                f"Score this month: {score}",
+            ] + ([f"Oldest overdue: {overdue[0].code} - {overdue[0].title[:60]}"]
+                 if overdue else [])
+              + ["", "Close what you can, or post a status update on the rest."]),
+            link="/tasks",
+            wa_template=("day_end_digest", [
+                user.get_full_name() or user.username,
+                str(bucket["done_today"]),
+                str(len(open_tasks)),
+                str(len(overdue)),
+                score,
+            ]),
         )
         sent += 1
     return sent
@@ -146,6 +219,7 @@ def send_followup_reminders() -> int:
         sent += 1
     sent += send_task_reminders()
     send_daily_task_digest()            # date-guarded: one per person per day
+    send_day_end_digest()               # date-guarded: once a day after 7 PM
     purge_expired_attachments()
     from mistakes.sla import escalate_overdue_mistakes  # lazy: avoids app-load cycles
     from mistakes.digests import send_daily_manager_summaries, send_weekly_founder_digest

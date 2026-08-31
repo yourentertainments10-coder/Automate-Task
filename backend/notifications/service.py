@@ -60,5 +60,11 @@ def notify_follow_up_due(lead):
         f"Follow-up due: {lead.customer_name}",
         f"{lead.requirement or ''}\nStatus: {lead.get_status_display()} · "
         f"Phone: {lead.phone or '-'}".strip(),
+        wa_template=("lead_followup_due", [
+            lead.assigned_to.get_full_name() or lead.assigned_to.username,
+            lead.customer_name,
+            lead.get_status_display(),
+            lead.phone or "not on file",
+        ]),
         link="/leads",
     )
