@@ -150,7 +150,7 @@ def _notify_task_assigned(task, actor):
         task.assigned_to, "task_assigned",
         f"Task assigned by {who}: {task.title}"[:200],
         "\n".join(bits),
-        link="/tasks",
+        link=f"/tasks/{task.id}",
         wa_template=("new_task_assigne", [
             task.assigned_to.get_full_name() or task.assigned_to.username,
             f"{task.code} · {task.title}",
@@ -177,7 +177,7 @@ def _notify_task_completed(task, actor):
     for target in targets:
         if target and target.is_active and target.pk != actor.pk:
             notify(target, "task_completed",
-                   f"✅ Completed: {task.title}"[:200], body, link="/tasks",
+                   f"✅ Completed: {task.title}"[:200], body, link=f"/tasks/{task.id}",
                    wa_template=("task_completed_alert", [
                        target.get_full_name() or target.username,
                        f"{task.code} · {task.title}",
@@ -408,7 +408,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                                "You are only following this - it is not assigned to you.",
                                "It shows under Tasks > Subscribed.",
                            ]),
-                           link="/tasks",
+                           link=f"/tasks/{task.id}",
                            wa_template=("task_inloop_alert", [
                                colleague.get_full_name() or colleague.username,
                                f"{task.code} - {task.title}",
@@ -591,7 +591,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                            "",
                            "Open Tasks to reply.",
                        ]),
-                       link="/tasks",
+                       link=f"/tasks/{task.id}", link_label="Reply to this task",
                        wa_template=("task_comment_alert", [
                            target.get_full_name() or target.username,
                            who_c,
@@ -809,7 +809,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                        "",
                        "No action needed unless this looks off - open Tasks to reply.",
                    ]),
-                   link="/tasks")
+                   link=f"/tasks/{task.id}")
         return Response(TaskSerializer(task, context={"request": request}).data)
 
     @action(detail=False, methods=["get"])
@@ -1254,8 +1254,38 @@ class TaskViewSet(viewsets.ModelViewSet):
             notify(approver, "task_change_request",
                    f"Change request on {task.code}: {task.title}"[:200],
                    _change_request_body(req, approver),
-                   link="/tasks")
+                   link=f"/tasks/{task.id}")
         return Response(TaskChangeRequestSerializer(req).data, status=http.HTTP_201_CREATED)
+
+    MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser])
+    def upload(self, request, pk=None):
+        """Attach a reference file to a task -- the invoice or photo the
+        assignee needs in order to DO the work. (Completion proof goes up the
+        same way through /complete/.)"""
+        task = self.get_object()
+        if not self._can_touch_detail(request.user, task):
+            raise PermissionDenied(
+                "Only the assignee, the person who gave the task, or an admin "
+                "can add files here.")
+        if task.deleted_at:
+            raise ValidationError({"detail": "This task is deleted."})
+        uploaded = request.FILES.getlist("file") or (
+            [request.FILES["files"]] if "files" in request.FILES else [])
+        if not uploaded:
+            raise ValidationError({"file": "Pick a file to attach."})
+        for f in uploaded[:5]:
+            if f.size > self.MAX_UPLOAD_BYTES:
+                raise ValidationError(
+                    {"file": f"{f.name} is larger than 10 MB — compress it or share a link."})
+        for f in uploaded[:5]:
+            TaskAttachment.objects.create(task=task, file=f, filename=f.name[:255],
+                                          uploaded_by=request.user)
+            act(task, request.user, f"Attached: {f.name[:120]}")
+        return Response(TaskAttachmentSerializer(
+            task.attachments.select_related("uploaded_by"), many=True).data,
+            status=http.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"])
     def files(self, request, pk=None):
@@ -1412,7 +1442,7 @@ class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
                        _change_request_body(req, admin)
                        + f"\nEscalated by: {request.user.get_full_name() or request.user.username}"
                        + (f"\nTheir remarks: {req.remarks}" if req.remarks else ""),
-                       link="/tasks")
+                       link=f"/tasks/{req.task.id}")
             notify(req.requested_by, "task_change_reviewed",
                    f"Sent to admin - your change request on {req.task.code}: {req.task.title}"[:200],
                    "\n".join([
@@ -1422,7 +1452,7 @@ class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
                    ] + [f"  - {line}" for line in req.describe()]
                      + ([f"\nTheir remarks: {req.remarks}"] if req.remarks else [])
                      + ["", "An admin will decide this now - nothing to do until then."]),
-                   link="/tasks")
+                   link=f"/tasks/{req.task.id}")
             return Response(TaskChangeRequestSerializer(req).data)
 
         req.status = decision
@@ -1455,7 +1485,7 @@ class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
                  + ["", ("Nothing to do - carry on with the task."
                          if decision == "approved"
                          else "Talk to the reviewer if you still need this change.")]),
-               link="/tasks")
+               link=f"/tasks/{task.id}")
         # keep Admin in the loop on creator-approved requests too
         if not has_capability(request.user, "tasks.view_all"):
             for admin in _admins().exclude(pk__in=[request.user.pk, req.requested_by_id]):
@@ -1470,7 +1500,7 @@ class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
                            "", "Changes:",
                        ] + [f"  - {line}" for line in req.describe()]
                          + ["", "Log only - no action needed."]),
-                       link="/tasks")
+                       link=f"/tasks/{task.id}")
         return Response(TaskChangeRequestSerializer(req).data)
 
     def _apply(self, task, changes, actor):
@@ -1641,7 +1671,7 @@ class TaskCategoryViewSet(viewsets.ModelViewSet):
                        "",
                        "They could not find a category that fits their task.",
                        "Approve or reject it in Settings -> Task categories.",
-                   ]), link="/tasks")
+                   ]), link="/settings", link_label="Review the request")
 
     def perform_destroy(self, instance):
         instance.active = False              # never lose reporting history

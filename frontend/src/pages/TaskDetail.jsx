@@ -1,8 +1,8 @@
 /* E1: Task detail slide-over — everything about ONE task in one panel:
    header chips, checklist, sub-tasks, comments, updates feed, attachments,
    plus the action row and the per-task AI summary (E3). */
-import { useCallback, useEffect, useState } from 'react'
-import { api, errorText } from '../api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, apiUpload, errorText } from '../api'
 import { CompleteModal, ProgressModal, RequestChangeModal } from './TaskExtras'
 import { fmtEffort, relDue } from './Tasks'
 
@@ -10,7 +10,9 @@ const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
   : null
 
-export default function TaskDetailPanel({ taskId, user, team, settings, onClose, onChanged }) {
+export default function TaskDetailPanel({ taskId, user, team, settings,
+                                          focusComment = false,
+                                          onClose, onChanged }) {
   const [t, setT] = useState(null)
   const [feed, setFeed] = useState([])
   const [files, setFiles] = useState([])
@@ -20,6 +22,8 @@ export default function TaskDetailPanel({ taskId, user, team, settings, onClose,
   const [modal, setModal] = useState(null)       // progress | complete | request
   const [ticking, setTicking] = useState(null)  // the step being ticked
   const [stepNote, setStepNote] = useState('')  // "what did you do" for that step
+  const focusedOnce = useRef(false)
+  const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState('')
 
   const load = useCallback(() => {
@@ -181,23 +185,44 @@ export default function TaskDetailPanel({ taskId, user, team, settings, onClose,
               </>
             )}
 
-            {/* attachments */}
-            {files.length > 0 && (
-              <>
-                <h3 style={{ margin: '14px 0 6px' }}>Attachments</h3>
-                {files.map(f => (
-                  <div key={f.id} className="small" style={{ padding: '2px 0' }}>
-                    📎 <a href={f.url} target="_blank" rel="noreferrer">{f.filename}</a>
-                    <span className="muted"> · {f.uploaded_by?.name}</span>
-                  </div>
-                ))}
-              </>
-            )}
+            {/* attachments — reference files, addable at any time */}
+            <h3 style={{ margin: '14px 0 6px' }}>
+              Attachments {files.length > 0 && <span className="muted small">{files.length}</span>}
+            </h3>
+            {files.map(f => (
+              <div key={f.id} className="small" style={{ padding: '2px 0' }}>
+                📎 <a href={f.url} target="_blank" rel="noreferrer">{f.filename}</a>
+                <span className="muted"> · {f.uploaded_by?.name}</span>
+              </div>
+            ))}
+            {files.length === 0 && <p className="muted small">No files yet.</p>}
+            <div style={{ marginTop: 6 }}>
+              <input type="file" multiple disabled={uploading}
+                onChange={async e => {
+                  const picked = [...e.target.files].slice(0, 5)
+                  if (!picked.length) return
+                  setErr(''); setUploading(true)
+                  try {
+                    const fd = new FormData()
+                    picked.forEach(f => fd.append('file', f))
+                    await apiUpload(`/api/tasks/${taskId}/upload/`, fd)
+                    load(); onChanged?.()
+                  } catch (ex) { setErr(errorText(ex.data) || ex.message) }
+                  finally { setUploading(false); e.target.value = '' }
+                }} />
+              <div className="muted small">
+                {uploading ? 'Uploading…' : 'Up to 5 files, 10 MB each.'}
+              </div>
+            </div>
 
             {/* comments + updates feed */}
             <h3 style={{ margin: '14px 0 6px' }}>Comments &amp; updates</h3>
             <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               <input placeholder="Write a comment…" value={comment} style={{ flex: 1 }}
+                ref={el => { if (el && focusComment && !focusedOnce.current) {
+                  focusedOnce.current = true
+                  el.scrollIntoView({ block: 'center' }); el.focus()
+                } }}
                 onChange={e => setComment(e.target.value)}
                 onKeyDown={async e => {
                   if (e.key === 'Enter' && comment.trim()) {

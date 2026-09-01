@@ -13,6 +13,7 @@ import base64
 import logging
 import os
 import time
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import requests
@@ -60,7 +61,36 @@ def _access_token() -> str | None:
         return None
 
 
-def send_email(to_email: str, subject: str, body: str) -> dict:
+APP_BASE_URL = os.environ.get(
+    "APP_BASE_URL", "https://automatetask.onrender.com").rstrip("/")
+
+
+def _html_email(body: str, link: str, label: str) -> str:
+    """Plain body + one big button. People read these on a phone: the whole
+    point is to go straight to the task, not to hunt for it in the app."""
+    from html import escape
+    url = link if link.startswith("http") else f"{APP_BASE_URL}{link}"
+    lines = "".join(
+        f"<div style='margin:0 0 6px'>{escape(l) if l.strip() else '&nbsp;'}</div>"
+        for l in body.split("\n"))
+    return f"""<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;font-size:15px;
+            color:#1a221f;line-height:1.5;max-width:560px">
+  {lines}
+  <div style="margin:22px 0 6px">
+    <a href="{escape(url)}"
+       style="display:inline-block;background:#0d7a5f;color:#ffffff;
+              text-decoration:none;font-weight:700;font-size:15px;
+              padding:13px 26px;border-radius:10px">{escape(label)}</a>
+  </div>
+  <div style="color:#66716c;font-size:12px;margin-top:14px">
+    Or paste this into your browser:<br>
+    <a href="{escape(url)}" style="color:#0d7a5f">{escape(url)}</a>
+  </div>
+</div>"""
+
+
+def send_email(to_email: str, subject: str, body: str,
+               link: str = "", link_label: str = "Open in Automate Task") -> dict:
     if not to_email:
         return {"channel": "gmail", "status": "skipped", "detail": "user has no email"}
     if not is_configured():
@@ -69,7 +99,12 @@ def send_email(to_email: str, subject: str, body: str) -> dict:
     if not token:
         return {"channel": "gmail", "status": "error", "detail": "token refresh failed"}
 
-    msg = MIMEText(body)
+    if link:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        msg.attach(MIMEText(_html_email(body, link, link_label), "html", "utf-8"))
+    else:
+        msg = MIMEText(body, "plain", "utf-8")
     msg["to"] = to_email
     msg["from"] = _cfg()["sender"]
     msg["subject"] = subject

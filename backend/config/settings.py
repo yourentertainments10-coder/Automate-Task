@@ -152,6 +152,34 @@ STATIC_ROOT = BASE_DIR / "staticfiles"          # collectstatic target (admin cs
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# ---------------------------------------------------------------------------
+# Uploads: S3 when a bucket is configured, the local disk otherwise.
+#
+# This matters more than it looks. A container's own disk is WIPED on every
+# deploy and restart, so task attachments, leave documents and form uploads
+# were disappearing while their database rows stayed behind. S3 keeps them.
+# Set AWS_STORAGE_BUCKET_NAME (plus keys and region) to switch it on; leave
+# it blank and everything behaves exactly as before.
+# ---------------------------------------------------------------------------
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
+USE_S3 = bool(AWS_STORAGE_BUCKET_NAME) and not TESTING
+
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
+
+if USE_S3:
+    AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY")
+    AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", "ap-south-1")   # Mumbai
+    AWS_S3_FILE_OVERWRITE = False        # two invoice.pdf uploads stay separate
+    AWS_DEFAULT_ACL = None               # bucket owner keeps control
+    AWS_QUERYSTRING_AUTH = True          # links are signed and expire
+    AWS_QUERYSTRING_EXPIRE = int(env("AWS_LINK_EXPIRY_SECONDS", "3600"))
+    AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN") or None     # optional CDN
+    STORAGES["default"] = {"BACKEND": "storages.backends.s3.S3Storage"}
+
 # Single-service deploy: WhiteNoise serves the built React app (frontend/dist)
 # at the URL root — /assets/*, sw.js, manifest, face models and / itself.
 # Locally dist may not exist; dev uses the Vite server instead.

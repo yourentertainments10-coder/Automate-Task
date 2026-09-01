@@ -1,7 +1,10 @@
 """Phase E: task detail (checklist, sub-tasks, comments, per-task feed) and
 the AI layer's deterministic fallback."""
+import tempfile
 from datetime import timedelta
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.utils import timezone
 
 from .ai_tasks import draft_task, review_sentence
@@ -203,3 +206,104 @@ class AssignerChecklistTests(Base):
         res = self.client.post(f"/api/tasks/{tid}/complete/",
                                {"remarks": "nothing to it", "actual_minutes": 5}, format="json")
         self.assertEqual(res.status_code, 200, res.data)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class TaskAttachmentTests(Base):
+    """The assigner can hand over an invoice/photo with the task, so the
+    assignee has what they need to actually do it."""
+
+    def make_task(self):
+        return self.create_task(self.manager, self.rahul, title="Pay vendor").data["id"]
+
+    def png(self, name="invoice.png"):
+        return SimpleUploadedFile(name, b"\x89PNG\r\n\x1a\nfake", content_type="image/png")
+
+    def test_assigner_attaches_a_file_and_assignee_sees_it(self):
+        tid = self.make_task()
+        self.as_(self.manager)
+        res = self.client.post(f"/api/tasks/{tid}/upload/", {"file": self.png()})
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual([f["filename"] for f in res.data], ["invoice.png"])
+
+        self.as_(self.rahul)
+        files = self.client.get(f"/api/tasks/{tid}/files/").data
+        self.assertEqual(files[0]["filename"], "invoice.png")
+        self.assertTrue(files[0]["url"])
+
+    def test_attaching_is_logged_so_everyone_can_see_it_arrived(self):
+        tid = self.make_task()
+        self.as_(self.manager)
+        self.client.post(f"/api/tasks/{tid}/upload/", {"file": self.png("po.png")})
+        self.assertTrue(Task.objects.get(pk=tid).activities
+                        .filter(text__startswith="Attached: po.png").exists())
+
+    def test_several_files_at_once(self):
+        tid = self.make_task()
+        self.as_(self.manager)
+        res = self.client.post(f"/api/tasks/{tid}/upload/",
+                               {"file": [self.png("a.png"), self.png("b.png")]})
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(len(res.data), 2)
+
+    def test_an_outsider_cannot_attach(self):
+        tid = self.make_task()
+        self.as_(self.amit)          # neither assignee nor creator
+        res = self.client.post(f"/api/tasks/{tid}/upload/", {"file": self.png()})
+        self.assertIn(res.status_code, (403, 404))
+
+    def test_no_file_is_a_clear_error(self):
+        tid = self.make_task()
+        self.as_(self.manager)
+        res = self.client.post(f"/api/tasks/{tid}/upload/", {})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("file", res.data)
+
+    def test_oversized_file_is_refused(self):
+        tid = self.make_task()
+        self.as_(self.manager)
+        big = SimpleUploadedFile("big.bin", b"x" * (10 * 1024 * 1024 + 1))
+        res = self.client.post(f"/api/tasks/{tid}/upload/", {"file": big})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("10 MB", str(res.data))
+
+
+class StorageConfigTests(TestCase):
+    """Uploads must switch to S3 when a bucket is configured and keep working
+    on the local disk when it is not."""
+
+    def test_local_disk_by_default(self):
+        from django.conf import settings
+        self.assertFalse(settings.USE_S3)
+        self.assertIn("FileSystemStorage", settings.STORAGES["default"]["BACKEND"])
+
+    def test_s3_backend_is_selected_when_a_bucket_is_set(self):
+        """Reload settings with a bucket present and confirm the S3 backend
+        is chosen — without ever contacting AWS."""
+        import importlib
+        from unittest import mock
+        with mock.patch.dict("os.environ", {
+                "AWS_STORAGE_BUCKET_NAME": "test-bucket",
+                "AWS_ACCESS_KEY_ID": "AKIATEST",
+                "AWS_SECRET_ACCESS_KEY": "secret",
+                "AWS_S3_REGION_NAME": "ap-south-1"}):
+            import config.settings as s
+            src = importlib.util.spec_from_file_location("probe", s.__file__)
+            probe = importlib.util.module_from_spec(src)
+            probe.__dict__["__name__"] = "probe"
+            import sys as _sys
+            argv = _sys.argv
+            _sys.argv = ["manage.py", "runserver"]     # not "test": S3 stays on
+            try:
+                src.loader.exec_module(probe)
+            finally:
+                _sys.argv = argv
+        self.assertTrue(probe.USE_S3)
+        self.assertEqual(probe.STORAGES["default"]["BACKEND"],
+                         "storages.backends.s3.S3Storage")
+        self.assertFalse(probe.AWS_S3_FILE_OVERWRITE)   # never clobber a file
+        self.assertTrue(probe.AWS_QUERYSTRING_AUTH)     # links are signed
+
+    def test_the_s3_backend_actually_imports(self):
+        from storages.backends.s3 import S3Storage
+        self.assertTrue(callable(S3Storage))

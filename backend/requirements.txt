@@ -8,3 +8,7 @@ requests>=2.32
 psycopg[binary]>=3.2
 gunicorn>=23.0
 whitenoise>=6.8
+
+# File storage: S3 when AWS_STORAGE_BUCKET_NAME is set, local disk otherwise.
+# Needed because a container's own disk is wiped on every deploy.
+django-storages[s3]>=1.14

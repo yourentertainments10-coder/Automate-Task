@@ -249,6 +249,7 @@ export default function App() {
           <Route path="/" element={<Protected><Home /></Protected>} />
           <Route path="/leads" element={<Protected><Leads /></Protected>} />
           <Route path="/tasks" element={<Protected><Tasks /></Protected>} />
+          <Route path="/tasks/:taskId" element={<Protected><Tasks /></Protected>} />
           <Route path="/groups" element={<Protected><Groups /></Protected>} />
           <Route path="/notices" element={<Protected><Notices /></Protected>} />
           <Route path="/links" element={<Protected><Links /></Protected>} />

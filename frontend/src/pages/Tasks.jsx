@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import {
   BarElement, CategoryScale, Chart as ChartJS, LinearScale, Tooltip,
 } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
-import { api, errorText } from '../api'
+import { api, apiUpload, errorText } from '../api'
 import { useAuth } from '../auth'
 import Directory from './Directory'
 import PersonProfile from './PersonProfile'
@@ -44,6 +45,10 @@ const RANGES = [
 
 export default function Tasks() {
   const { can } = useAuth()
+  // Opened from a notification email: /tasks/<id> lands straight on that task
+  const { taskId: deepLinked } = useParams()
+  const [openTask, setOpenTask] = useState(null)
+  useEffect(() => { if (deepLinked) setOpenTask(Number(deepLinked)) }, [deepLinked])
   const isAdmin = can('tasks.view_all')
   const isManager = isAdmin || can('tasks.view_department')
   const [area, setArea] = useState('dashboard')
@@ -106,7 +111,22 @@ export default function Tasks() {
       {area === 'employees' && <EmployeesReport />}
       {area === 'disputes' && <DisputesReport />}
       {area === 'deleted' && <DeletedTasks />}
+      {openTask && (
+        <TaskDeepLink taskId={openTask} onClose={() => setOpenTask(null)} />
+      )}
     </div>
+  )
+}
+
+/* The task a notification email pointed at. Opens the normal detail panel,
+   so replying to a query is one tap from the mail. */
+function TaskDeepLink({ taskId, onClose }) {
+  const { user } = useAuth()
+  const [settings, setSettings] = useState({})
+  useEffect(() => { api('/api/task-settings/').then(setSettings).catch(() => {}) }, [])
+  return (
+    <TaskDetailPanel taskId={taskId} user={user} team={[]} settings={settings}
+      focusComment onClose={onClose} onChanged={() => {}} />
   )
 }
 
@@ -745,6 +765,9 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
   // off one by one and cannot complete the task until all are done.
   const [steps, setSteps] = useState([])
   const [stepDraft, setStepDraft] = useState('')
+  // Optional reference files the assignee needs to DO the work — an invoice,
+  // a photo, a spec. Not the completion proof, which is collected at the end.
+  const [attachments, setAttachments] = useState([])
   const addStep = () => {
     const t = stepDraft.trim()
     if (!t) return
@@ -819,13 +842,18 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
     let created = 0
     try {
       for (const id of assignees) {
-        await api('/api/tasks/', {
+        const made = await api('/api/tasks/', {
           method: 'POST',
           body: {
             ...base, assigned_to: id, checklist: steps,
             in_loop: inLoop.filter(x => x !== id),
           },
         })
+        if (attachments.length) {
+          const fd = new FormData()
+          attachments.forEach(f => fd.append('file', f))
+          await apiUpload(`/api/tasks/${made.id}/upload/`, fd)
+        }
         created += 1
       }
       onSaved()
@@ -894,6 +922,33 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
               mark the task complete once every step is done.
             </p>
           )}
+        </div>
+
+        <div className="steps-box">
+          <div className="steps-head">
+            <strong>Attachments</strong>
+            <span className="muted small">optional — invoice, photo, anything they need</span>
+          </div>
+          <input type="file" multiple
+            onChange={e => setAttachments([...e.target.files].slice(0, 5))} />
+          {attachments.length > 0 && (
+            <ul className="steps-list">
+              {attachments.map((f, i) => (
+                <li key={i}>
+                  <span className="steps-text">📎 {f.name}
+                    <span className="muted small"> · {Math.round(f.size / 1024)} KB</span>
+                  </span>
+                  <span className="steps-actions">
+                    <button type="button" className="btn btn-sm" title="Remove"
+                      onClick={() => setAttachments(p => p.filter((_, k) => k !== i))}>✕</button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="muted small" style={{ margin: '6px 0 0' }}>
+            Up to 5 files, 10 MB each. Everyone on the task can open them.
+          </p>
         </div>
         <div className="form-grid">
           <div className="wide">
