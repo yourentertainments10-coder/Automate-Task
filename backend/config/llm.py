@@ -22,7 +22,8 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 # NVIDIA's hosted models cold-start: the first call after an idle spell can
 # take a minute. Anthropic answers in a few seconds.
-DEFAULT_TIMEOUT = {"nvidia": 90, "anthropic": 30, "openai": 30}
+DEFAULT_TIMEOUT = {"nvidia": 90, "anthropic": 30, "openai": 30,
+                   "openrouter": 60, "groq": 30, "gemini": 30, "together": 60}
 
 
 def _key() -> str:
@@ -36,10 +37,11 @@ def provider() -> str:
     if explicit:
         return explicit
     key = _key()
-    if key.startswith("nvapi-"):
-        return "nvidia"
-    if key.startswith("sk-ant-"):
-        return "anthropic"
+    for prefix, name in (("nvapi-", "nvidia"), ("sk-ant-", "anthropic"),
+                         ("sk-or-", "openrouter"), ("gsk_", "groq"),
+                         ("AIza", "gemini"), ("hf_", "huggingface")):
+        if key.startswith(prefix):
+            return name
     return "openai" if key.startswith("sk-") else "anthropic"
 
 
@@ -47,8 +49,12 @@ def model() -> str:
     name = (os.environ.get("AI_MODEL") or os.environ.get("ANTHROPIC_MODEL") or "").strip()
     if name and not (provider() == "nvidia" and name.startswith("claude")):
         return name
-    return {"nvidia": "mistralai/mistral-nemotron",
-            "openai": "gpt-4o-mini"}.get(provider(), "claude-sonnet-5")
+    return {"nvidia": "nvidia/nemotron-3-nano-30b-a3b",
+            "openai": "gpt-4o-mini",
+            "groq": "llama-3.3-70b-versatile",
+            "gemini": "gemini-2.0-flash-lite",
+            "openrouter": "google/gemma-3-27b-it:free",
+            }.get(provider(), "claude-sonnet-5")
 
 
 def enabled() -> bool:
@@ -60,6 +66,26 @@ def _timeout() -> int:
     if raw.isdigit():
         return int(raw)
     return DEFAULT_TIMEOUT.get(provider(), 30)
+
+
+# Every one of these speaks the OpenAI chat format, so switching provider is
+# a key + a base URL, never a code change.
+OPENAI_COMPATIBLE = {
+    "nvidia": NVIDIA_URL,
+    "openai": "https://api.openai.com/v1/chat/completions",
+    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    "groq": "https://api.groq.com/openai/v1/chat/completions",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    "together": "https://api.together.xyz/v1/chat/completions",
+}
+
+
+def _chat_url(who: str) -> str:
+    """AI_BASE_URL wins, so a provider we have never heard of still works."""
+    override = os.environ.get("AI_BASE_URL", "").strip().rstrip("/")
+    if override:
+        return override if override.endswith("/chat/completions")             else f"{override}/chat/completions"
+    return OPENAI_COMPATIBLE.get(who, OPENAI_COMPATIBLE["openai"])
 
 
 def chat(system: str, user: str, max_tokens: int = 700) -> str | None:
@@ -82,8 +108,9 @@ def chat(system: str, user: str, max_tokens: int = 700) -> str | None:
                 return None
             return "".join(b.get("text", "") for b in res.json().get("content", []))
 
-        # NVIDIA and OpenAI both speak the OpenAI chat format
-        url = NVIDIA_URL if who == "nvidia" else "https://api.openai.com/v1/chat/completions"
+        # NVIDIA, OpenRouter, Groq, Gemini's compat endpoint and OpenAI itself
+        # all speak the same chat format, so one branch serves them all.
+        url = _chat_url(who)
         res = requests.post(
             url,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},

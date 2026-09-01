@@ -1195,10 +1195,13 @@ class TaskViewSet(viewsets.ModelViewSet):
         if task.status == TaskStatus.DONE:
             raise ValidationError({"detail": "This task is already completed."})
         remarks = str(request.data.get("remarks", "")).strip()
-        file = request.FILES.get("file")
-        if file and file.size > 10 * 1024 * 1024:
-            raise ValidationError({"file": "File exceeds 10 MB."})
-        self._enforce_completion_evidence(task, remarks=remarks, has_new_file=bool(file))
+        # proof can be several files -- one photo rarely proves a whole job
+        proof = request.FILES.getlist("file")[:self.MAX_PROOF_FILES]
+        for f in proof:
+            if f.size > self.MAX_UPLOAD_BYTES:
+                raise ValidationError(
+                    {"file": f"{f.name} is larger than 10 MB — compress it or share a link."})
+        self._enforce_completion_evidence(task, remarks=remarks, has_new_file=bool(proof))
         # P2: the actual TOTAL effort spent is mandatory at completion --
         # it powers the Time Spent report next to Time Earned.
         try:
@@ -1210,8 +1213,8 @@ class TaskViewSet(viewsets.ModelViewSet):
                 "actual_minutes": "Enter the total effort actually spent (in minutes).",
                 "needs": "actual_minutes"})
 
-        if file:
-            TaskAttachment.objects.create(task=task, file=file, filename=file.name,
+        for f in proof:
+            TaskAttachment.objects.create(task=task, file=f, filename=f.name[:255],
                                           uploaded_by=request.user)
         old_status = task.status
         task.status = TaskStatus.DONE
@@ -1222,8 +1225,8 @@ class TaskViewSet(viewsets.ModelViewSet):
         assigned_view = f"{task.effort_minutes}m" if task.effort_minutes else "not set"
         act(task, request.user,
             f"Completed — took {actual}m (assigned: {assigned_view}): {remarks[:180]}")
-        if file:
-            act(task, request.user, f"Completion proof attached: {file.name}")
+        for f in proof:
+            act(task, request.user, f"Completion proof attached: {f.name[:120]}")
         self._after_status_change(task, request.user, old_status, task.assigned_to)
         return Response(TaskSerializer(task, context={"request": request}).data)
 
@@ -1258,6 +1261,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         return Response(TaskChangeRequestSerializer(req).data, status=http.HTTP_201_CREATED)
 
     MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+    MAX_PROOF_FILES = 5
 
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser])
     def upload(self, request, pk=None):

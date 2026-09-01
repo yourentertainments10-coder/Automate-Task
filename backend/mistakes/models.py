@@ -113,6 +113,79 @@ class MistakeSettings(models.Model):
         }.get(severity, self.sla_medium_hours)
 
 
+class SOP(models.Model):
+    """The written process for one job — the thing a mistake gets judged
+    against.
+
+    Without this the system can only record that somebody erred; it cannot
+    tell a HUMAN ERROR ("the process was clear, they skipped a step") from a
+    PROCESS FAILURE ("the process never said to check that"). Storing the
+    actual steps is what makes that difference decidable — by a manager
+    reading it, and later by the AI comparing an explanation against it.
+
+    Versioning is deliberate: when a process changes, a NEW version is
+    written and the old one is kept, so a mistake from March is still judged
+    against the process that existed in March.
+    """
+    title = models.CharField(max_length=150)
+    department = models.CharField(max_length=20, choices=Department.choices,
+                                  blank=True, default="")
+    category = models.CharField(max_length=60, blank=True, default="",
+                                help_text="Matches the mistake category, e.g. 'Data Entry'.")
+    version = models.CharField(max_length=40, default="v1")
+    # The steps themselves. One instruction per line, numbered.
+    steps = models.TextField(
+        help_text="One step per line, in order. Say exactly what to do and "
+                  "what 'done correctly' looks like.")
+    # What must be true BEFORE the job is considered correct
+    checks = models.TextField(blank=True, default="",
+                              help_text="What to verify before calling it done.")
+    common_errors = models.TextField(
+        blank=True, default="",
+        help_text="Mistakes people actually make here — this is what the AI "
+                  "matches a new mistake against.")
+    active = models.BooleanField(default=True)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                              on_delete=models.SET_NULL, related_name="owned_sops",
+                              help_text="Who keeps this process up to date.")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                   on_delete=models.SET_NULL, related_name="written_sops")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["department", "title", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["title", "version"], name="uniq_sop_version"),
+        ]
+        verbose_name = "SOP"
+        verbose_name_plural = "SOPs"
+
+    def __str__(self):
+        return f"{self.title} ({self.version})"
+
+    @property
+    def step_list(self) -> list[str]:
+        return [s.strip(" -•\t0123456789.")
+                for s in self.steps.splitlines() if s.strip()]
+
+    def as_prompt(self) -> str:
+        """The SOP flattened for an AI comparison — steps, checks and the
+        errors seen before, in the order a reviewer would read them."""
+        parts = [f"PROCESS: {self.title} ({self.version})"]
+        if self.department:
+            parts.append(f"Department: {self.get_department_display()}")
+        parts.append("STEPS:")
+        parts += [f"  {i}. {s}" for i, s in enumerate(self.step_list, 1)]
+        if self.checks.strip():
+            parts.append("CHECKS BEFORE DONE:")
+            parts += [f"  - {c.strip()}" for c in self.checks.splitlines() if c.strip()]
+        if self.common_errors.strip():
+            parts.append("KNOWN MISTAKES HERE:")
+            parts += [f"  - {c.strip()}" for c in self.common_errors.splitlines() if c.strip()]
+        return "\n".join(parts)
+
+
 class Mistake(models.Model):
     # who + where
     employee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
@@ -150,8 +223,13 @@ class Mistake(models.Model):
 
     # SOP linking — "SOP followed = NO" -> employee side;
     # "SOP adequate = NO" -> the PROCESS is broken, fix the company not the person
+    # sop_name/sop_version stay as free text for mistakes logged before the
+    # SOP register existed; new ones should point at the real document.
     sop_name = models.CharField(max_length=150, blank=True, default="")
     sop_version = models.CharField(max_length=40, blank=True, default="")
+    sop = models.ForeignKey("SOP", null=True, blank=True, on_delete=models.SET_NULL,
+                            related_name="mistakes",
+                            help_text="The written process this was judged against.")
     sop_step = models.CharField(max_length=200, blank=True, default="")
     sop_followed = models.BooleanField(null=True, blank=True)
     sop_adequate = models.BooleanField(null=True, blank=True)

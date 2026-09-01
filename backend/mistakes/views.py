@@ -19,12 +19,12 @@ from accounts.permissions import HasCapability, has_capability
 from notifications.service import notify
 
 from .models import (
-    Classification, Level3Action, Mistake, MistakeCategory, MistakeEvent,
+    SOP, Classification, Level3Action, Mistake, MistakeCategory, MistakeEvent,
     MistakeSettings, MistakeStatus, RootCause, Severity,
 )
 from .serializers import (
     MistakeCategorySerializer, MistakeEventSerializer, MistakeSerializer,
-    MistakeSettingsSerializer,
+    MistakeSettingsSerializer, SOPSerializer,
 )
 
 
@@ -399,6 +399,62 @@ class MistakeViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Admin only.")
         return Response({"daily": send_daily_manager_summaries(force=True),
                          "weekly": send_weekly_founder_digest(force=True)})
+
+
+class SOPViewSet(viewsets.ModelViewSet):
+    """The written-process register. Everyone reads it — an employee needs to
+    be able to look up how a job is done. Managers/admin write it."""
+    serializer_class = SOPSerializer
+    pagination_class = None
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsAuthenticated()]
+        return [HasCapability.of("tasks.assign")()]
+
+    def get_queryset(self):
+        qs = SOP.objects.select_related("owner")
+        p = self.request.query_params
+        if p.get("all") != "true":
+            qs = qs.filter(active=True)
+        if p.get("department"):
+            qs = qs.filter(department=p["department"])
+        if p.get("category"):
+            qs = qs.filter(category__iexact=p["category"])
+        if p.get("search"):
+            from django.db.models import Q
+            term = p["search"].strip()
+            qs = qs.filter(Q(title__icontains=term) | Q(steps__icontains=term)
+                           | Q(common_errors__icontains=term))
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        instance.active = False     # keep history: old mistakes still cite it
+        instance.save(update_fields=["active"])
+
+    @action(detail=True, methods=["post"])
+    def new_version(self, request, pk=None):
+        """Supersede a process without losing the old one, so a mistake from
+        March is still judged against March's process."""
+        old = self.get_object()
+        version = str(request.data.get("version", "")).strip()
+        if not version:
+            raise ValidationError({"version": "Name the new version, e.g. v2."})
+        if SOP.objects.filter(title=old.title, version=version).exists():
+            raise ValidationError({"version": f"{old.title} {version} already exists."})
+        new = SOP.objects.create(
+            title=old.title, department=old.department, category=old.category,
+            version=version,
+            steps=request.data.get("steps", old.steps),
+            checks=request.data.get("checks", old.checks),
+            common_errors=request.data.get("common_errors", old.common_errors),
+            owner=old.owner, created_by=request.user)
+        old.active = False
+        old.save(update_fields=["active"])
+        return Response(SOPSerializer(new).data, status=http.HTTP_201_CREATED)
 
 
 class MistakeCategoryViewSet(viewsets.ModelViewSet):

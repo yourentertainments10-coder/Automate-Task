@@ -3,8 +3,42 @@ from rest_framework import serializers
 from crm.serializers import UserBriefSerializer
 
 from .models import (
-    Mistake, MistakeCategory, MistakeEvent, MistakeSettings,
+    SOP, Mistake, MistakeCategory, MistakeEvent, MistakeSettings,
 )
+
+
+class SOPSerializer(serializers.ModelSerializer):
+    department_display = serializers.CharField(source="get_department_display", read_only=True)
+    owner_name = serializers.SerializerMethodField()
+    step_count = serializers.SerializerMethodField()
+    mistake_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SOP
+        fields = ["id", "title", "department", "department_display", "category",
+                  "version", "steps", "checks", "common_errors", "active",
+                  "owner", "owner_name", "step_count", "mistake_count",
+                  "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def get_owner_name(self, obj):
+        return (obj.owner.get_full_name() or obj.owner.username) if obj.owner else None
+
+    def get_step_count(self, obj):
+        return len(obj.step_list)
+
+    def get_mistake_count(self, obj):
+        return obj.mistakes.count()
+
+    def validate_steps(self, value):
+        """A process with one vague line cannot settle 'human error or
+        process failure?' — which is the whole point of writing it down."""
+        steps = [s for s in (value or "").splitlines() if s.strip()]
+        if len(steps) < 2:
+            raise serializers.ValidationError(
+                "Write at least two steps, one per line — a single sentence is "
+                "not a process anyone can be measured against.")
+        return value
 
 
 class MistakeCategorySerializer(serializers.ModelSerializer):
