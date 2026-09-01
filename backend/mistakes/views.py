@@ -28,6 +28,11 @@ from .serializers import (
 )
 
 
+def NL(lines):
+    """Join notification body lines."""
+    return chr(10).join(lines)
+
+
 def log(mistake, actor, text):
     MistakeEvent.objects.create(mistake=mistake, actor=actor, text=text[:400])
 
@@ -115,6 +120,7 @@ class MistakeViewSet(viewsets.ModelViewSet):
         mistake.save(update_fields=["sla_due_at"])
         log(mistake, user, f"Logged: {mistake.category} · severity {mistake.severity}"
             + (f" · ₹{mistake.financial_loss} loss" if mistake.financial_loss else ""))
+        self._apply_repeat_rules(mistake, user)
 
         # LEVEL 1: employee is asked to explain + correct (with SOP reference)
         if employee.pk != user.pk:
@@ -155,6 +161,104 @@ class MistakeViewSet(viewsets.ModelViewSet):
                 .exclude(pk=mistake.pk).order_by("-created_at")[:5]
             ]
         return Response(data)
+
+    # ---- rules: counting, escalation, the corrective task ----------------
+    def _apply_repeat_rules(self, mistake, actor):
+        """Everything with a consequence is decided by counting, never by a
+        model: the occurrence number, whether training is due, whether a PIP
+        should be proposed, and the corrective task itself."""
+        from crm.models import Task
+        from . import intelligence as intel
+
+        count = intel.occurrence_count(mistake)
+        verdict = intel.escalation_for(count)
+        prior = intel.prior_mistakes(mistake).first()
+
+        if count > 1:
+            # the SUGGESTION is automatic; a manager still confirms the link
+            mistake.occurrence_level = min(count, 3)
+            if prior and not mistake.repeat_of_id:
+                mistake.repeat_of = prior
+            mistake.escalation_level = max(mistake.escalation_level,
+                                           1 if verdict["suggest_pip"] else 0)
+            mistake.save(update_fields=["occurrence_level", "repeat_of",
+                                        "escalation_level"])
+            log(mistake, actor,
+                f"Occurrence {count} of '{mistake.category}' for this person "
+                f"\u2014 {verdict['why']}")
+
+        # the corrective task, spawned from the log itself
+        if mistake.employee and mistake.employee.is_active and not mistake.corrective_task_id:
+            due = timezone.now() + timedelta(days=2)
+            task = Task.objects.create(
+                title=f"Correct: {mistake.description[:80]}",
+                description=(f"Raised from mistake {mistake.code} "
+                             f"({mistake.category}).\n\n{mistake.description[:600]}\n\n"
+                             "Fix this, then explain the root cause on the mistake."),
+                assigned_to=mistake.employee,
+                created_by=actor if actor != mistake.employee else (mistake.manager or actor),
+                department=mistake.department or "",
+                category=mistake.category or "",
+                priority="high" if count >= intel.TRAINING_AT else "normal",
+                effort_minutes=30, due_at=due,
+            )
+            mistake.corrective_task = task
+            mistake.save(update_fields=["corrective_task"])
+            log(mistake, actor, f"Corrective task {task.code} created automatically")
+            notify(mistake.employee, "mistake_logged",
+                   f"Correct {mistake.code}: {mistake.description[:120]}"[:200],
+                   NL([f"Mistake: {mistake.code} \u00b7 {mistake.category}",
+                       mistake.description[:400], "",
+                       f"A corrective task {task.code} has been created for you.",
+                       "Fix it, then explain the root cause on the mistake."]),
+                   link=f"/tasks/{task.id}", link_label="Open the corrective task")
+
+        # training / PIP prompt to the accountable manager
+        if verdict["needs_training"] and mistake.manager and mistake.manager.is_active:
+            who = mistake.employee.get_full_name() or mistake.employee.username
+            head = (f"{who} has repeated '{mistake.category}' {count} times"
+                    if not verdict["suggest_pip"]
+                    else f"PIP review due: {who}, {count} times on '{mistake.category}'")
+            notify(mistake.manager, "mistake_repeat", head[:200],
+                   NL([f"Person: {who}",
+                       f"Category: {mistake.category}",
+                       f"Occurrence: {count} (counted over the last 12 months)",
+                       "",
+                       verdict["why"],
+                       "",
+                       ("Run a training session on this and record it, or the same "
+                        "mistake will keep coming back."
+                        if not verdict["suggest_pip"] else
+                        "Coaching has not closed this. Consider a formal Performance "
+                        "Improvement Plan \u2014 the decision is yours, the system only "
+                        "counts."),
+                       "",
+                       "This is a count, not a judgement: "
+                       f"{count} entries in the same category in 12 months."]),
+                   link="/mistakes")
+
+    # ---- AI: suggestions a human accepts or overrides ---------------------
+    @action(detail=True, methods=["get"])
+    def suggestions(self, request, pk=None):
+        """Everything the AI has to offer on one mistake, in one call.
+
+        Nothing here is applied automatically. Each block says which provider
+        produced it, and is null when the AI is off or unreachable \u2014 the
+        register keeps working either way.
+        """
+        from . import intelligence as intel
+        mistake = self.get_object()
+        allowed = list(MistakeCategory.objects.filter(active=True)
+                       .values_list("name", flat=True))
+        count = intel.occurrence_count(mistake)
+        return Response({
+            "occurrence": count,
+            "escalation": intel.escalation_for(count),
+            "category": intel.suggest_category(mistake.description, allowed),
+            "similar": intel.similar_past_mistakes(mistake),
+            "capa": intel.suggest_capa(mistake, count),
+            "judgement": intel.judge_human_or_process(mistake),
+        })
 
     # ---- employee's side ------------------------------------------------
     @action(detail=True, methods=["post"])

@@ -47,7 +47,7 @@ export function CompleteModal({ task, settings, onClose, onDone }) {
   const [remarks, setRemarks] = useState('')
   const [actual, setActual] = useState(task.actual_minutes ? String(task.actual_minutes) : '')
   const [unit, setUnit] = useState('minutes')
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([])   // several photos beat one
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -59,7 +59,7 @@ export function CompleteModal({ task, settings, onClose, onDone }) {
       fd.append('remarks', remarks)
       fd.append('actual_minutes',
         String(Math.round(Number(actual) * (unit === 'hours' ? 60 : 1))))
-      if (file) fd.append('file', file)
+      files.forEach(f => fd.append('file', f))
       await apiUpload(`/api/tasks/${task.id}/complete/`, fd)
       onDone()
     } catch (ex) { setErr(errorText(ex.data) || ex.message) }
@@ -94,15 +94,34 @@ export function CompleteModal({ task, settings, onClose, onDone }) {
             </div>
           </div>
           <div className="wide">
-            <label>Proof file / photo {settings.require_completion_attachment ? '*' : '(optional)'}</label>
-            <input type="file" onChange={e => setFile(e.target.files[0] || null)} />
+            <label>Proof files / photos {settings.require_completion_attachment ? '*' : '(optional)'}</label>
+            <input type="file" multiple
+              onChange={e => setFiles(prev => [...prev, ...e.target.files]
+                .filter((f, i, all) => all.findIndex(x => x.name === f.name && x.size === f.size) === i)
+                .slice(0, 5))} />
+            {files.length > 0 && (
+              <ul className="steps-list">
+                {files.map((f, i) => (
+                  <li key={i}>
+                    <span className="steps-text">📎 {f.name}
+                      <span className="muted small"> · {Math.round(f.size / 1024)} KB</span>
+                    </span>
+                    <span className="steps-actions">
+                      <button type="button" className="btn btn-sm" title="Remove this file"
+                        onClick={() => setFiles(p => p.filter((_, k) => k !== i))}>✕</button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="muted small">Up to 5 files, 10 MB each. ✕ removes a wrong one.</div>
           </div>
         </div>
         {err && <div className="err">{err}</div>}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={busy || !remarks.trim() || !actual
-            || (settings.require_completion_attachment && !file)}>
+            || (settings.require_completion_attachment && !files.length)}>
             {busy ? 'Saving…' : 'Complete task'}
           </button>
         </div>

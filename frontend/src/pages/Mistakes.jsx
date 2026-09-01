@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
+import { useDepartments } from '../useDepartments'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -44,6 +45,254 @@ const LEVEL3_ACTIONS = [
 const sevClass = (s) => ({ low: '', medium: '', high: 'prio prio-high', critical: 'prio prio-urgent' }[s] || '')
 
 export default function Mistakes() {
+  const { can } = useAuth()
+  const [area, setArea] = useState('register')
+  return (
+    <div>
+      <div className="page-head"><h1>Mistakes</h1></div>
+      <div className="area-tabs">
+        <button className={'tab' + (area === 'register' ? ' on' : '')}
+          onClick={() => setArea('register')}>Register</button>
+        <button className={'tab' + (area === 'sops' ? ' on' : '')}
+          onClick={() => setArea('sops')}>Processes (SOP)</button>
+      </div>
+      {area === 'register'
+        ? <MistakeRegister />
+        : <SOPRegister canEdit={can('tasks.assign')} />}
+    </div>
+  )
+}
+
+/* The written processes a mistake gets judged against. Without these you can
+   only record THAT somebody erred, never whether the process was even clear. */
+function SOPRegister({ canEdit }) {
+  const [rows, setRows] = useState(null)
+  const [editing, setEditing] = useState(null)   // null | 'new' | sop
+  const [openId, setOpenId] = useState(null)
+  const [q, setQ] = useState('')
+  const [err, setErr] = useState('')
+
+  const load = () => api('/api/sops/').then(setRows).catch(e => setErr(e.message))
+  useEffect(() => { load() }, [])
+
+  const shown = (rows || []).filter(s => !q.trim()
+    || `${s.title} ${s.category} ${s.common_errors}`.toLowerCase()
+        .includes(q.trim().toLowerCase()))
+
+  if (err && !rows) return <div className="err">{err}</div>
+  if (!rows) return <div className="center-note">Loading processes...</div>
+
+  return (
+    <div>
+      <p className="muted small" style={{ marginBottom: 10 }}>
+        Write down how each job is actually done. This is what decides whether a
+        mistake was <strong>human error</strong> (the process was clear, a step was
+        skipped) or a <strong>process failure</strong> (the process never said to do
+        it). Old versions are kept, so an old mistake is still judged against the
+        process that existed then.
+      </p>
+      <div className="filters">
+        <input type="search" placeholder="Search a process..." value={q}
+          onChange={e => setQ(e.target.value)} />
+        <span className="muted small">{shown.length} process(es)</span>
+        <span style={{ flex: 1 }} />
+        {canEdit && (
+          <button className="btn btn-primary" onClick={() => setEditing('new')}>
+            + Write a process
+          </button>
+        )}
+      </div>
+      {err && <div className="err">{err}</div>}
+      {shown.length === 0 && (
+        <p className="muted">
+          No process written yet. Start with the job that goes wrong most often.
+        </p>
+      )}
+      <div className="task-list">
+        {shown.map(s => (
+          <div key={s.id} className="task-row" style={{ flexWrap: 'wrap' }}>
+            <div className="task-main" style={{ cursor: 'pointer' }}
+              onClick={() => setOpenId(openId === s.id ? null : s.id)}>
+              <div className="task-title">
+                {s.title}
+                <span className="ai-chip">{s.version}</span>
+                {s.department_display && <span className="ai-chip">{s.department_display}</span>}
+                {s.category && <span className="ai-chip">{s.category}</span>}
+                <span className="ai-chip">{s.step_count} steps</span>
+                {s.mistake_count > 0 && (
+                  <span className="prio prio-high"
+                    title="Mistakes logged against this process">
+                    {s.mistake_count} mistake(s)
+                  </span>
+                )}
+              </div>
+              <div className="when">
+                {s.owner_name ? `Owned by ${s.owner_name}` : 'No owner set'}
+                {' \u00b7 updated '}
+                {new Date(s.updated_at).toLocaleDateString('en-IN',
+                  { day: 'numeric', month: 'short', year: 'numeric' })}
+              </div>
+            </div>
+            {canEdit && (
+              <button className="btn btn-sm" onClick={() => setEditing(s)}>Edit</button>
+            )}
+            {openId === s.id && (
+              <div style={{ flexBasis: '100%', marginTop: 8 }}>
+                <SOPBody sop={s} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {editing && (
+        <SOPModal initial={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load() }} />
+      )}
+    </div>
+  )
+}
+
+const sopLines = (text) => (text || '').split('\n').map(l => l.trim()).filter(Boolean)
+
+function SOPBody({ sop }) {
+  return (
+    <div className="small" style={{ background: 'var(--bg)', borderRadius: 10, padding: 12 }}>
+      <strong>Steps</strong>
+      <ol style={{ margin: '4px 0 10px 18px' }}>
+        {sopLines(sop.steps).map((s, i) => <li key={i}>{s}</li>)}
+      </ol>
+      {sop.checks?.trim() && (
+        <>
+          <strong>Check before calling it done</strong>
+          <ul style={{ margin: '4px 0 10px 18px' }}>
+            {sopLines(sop.checks).map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+        </>
+      )}
+      {sop.common_errors?.trim() && (
+        <>
+          <strong>Mistakes people make here</strong>
+          <ul style={{ margin: '4px 0 0 18px' }}>
+            {sopLines(sop.common_errors).map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+        </>
+      )}
+    </div>
+  )
+}
+
+const SOP_EMPTY = {
+  title: '', department: '', category: '', version: 'v1',
+  steps: '', checks: '', common_errors: '',
+}
+
+const SOP_STEP_HINT = [
+  'Collect the supplier invoice and the GRN for the same lot',
+  'Check the invoice GST number against the supplier master',
+  'Match every line item and rate against the purchase order',
+  'Create the purchase voucher in Tally under the correct ledger',
+].join('\n')
+
+function SOPModal({ initial, onClose, onSaved }) {
+  const DEPARTMENTS = useDepartments()
+  const [f, setF] = useState(initial ? { ...SOP_EMPTY, ...initial } : SOP_EMPTY)
+  const [newVersion, setNewVersion] = useState(false)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const set = k => e => setF(p => ({ ...p, [k]: e.target.value }))
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setErr(''); setBusy(true)
+    const body = {
+      title: f.title, department: f.department, category: f.category,
+      version: f.version, steps: f.steps, checks: f.checks,
+      common_errors: f.common_errors,
+    }
+    try {
+      if (newVersion && initial) {
+        await api(`/api/sops/${initial.id}/new_version/`, { method: 'POST', body })
+      } else if (initial) {
+        await api(`/api/sops/${initial.id}/`, { method: 'PATCH', body })
+      } else {
+        await api('/api/sops/', { method: 'POST', body })
+      }
+      onSaved()
+    } catch (ex) { setErr(errorText(ex.data) || ex.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <form className="modal-card task-form" onSubmit={submit}>
+        <h2>{initial ? `${f.title} - ${initial.version}` : 'Write a process'}</h2>
+        <div className="form-grid">
+          <div className="wide">
+            <label>What job is this? *</label>
+            <input required value={f.title} onChange={set('title')} autoFocus={!initial}
+              placeholder="e.g. Purchase invoice entry in Tally" />
+          </div>
+          <div>
+            <label>Department</label>
+            <select value={f.department} onChange={set('department')}>
+              <option value="">All departments</option>
+              {DEPARTMENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Mistake category it maps to</label>
+            <input value={f.category} onChange={set('category')} placeholder="e.g. Data Entry" />
+          </div>
+          <div>
+            <label>Version *</label>
+            <input required value={f.version} onChange={set('version')} placeholder="v1" />
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            {initial && (
+              <label className="muted small" style={{ display: 'flex', gap: 6 }}>
+                <input type="checkbox" checked={newVersion}
+                  onChange={e => setNewVersion(e.target.checked)} />
+                Save as a NEW version (keeps the old one)
+              </label>
+            )}
+          </div>
+          <div className="wide">
+            <label>Steps * - one per line, in order</label>
+            <textarea required rows={7} value={f.steps} onChange={set('steps')}
+              placeholder={SOP_STEP_HINT} />
+            <div className="muted small">
+              Say what to do AND what done-correctly looks like. Two lines minimum.
+            </div>
+          </div>
+          <div className="wide">
+            <label>Check before calling it done</label>
+            <textarea rows={3} value={f.checks} onChange={set('checks')}
+              placeholder="Voucher total equals the invoice total to the paisa" />
+          </div>
+          <div className="wide">
+            <label>Mistakes people make here</label>
+            <textarea rows={3} value={f.common_errors} onChange={set('common_errors')}
+              placeholder="Part name typed instead of the part code" />
+            <div className="muted small">
+              This is the list a new mistake gets matched against - write the real ones.
+            </div>
+          </div>
+        </div>
+        {err && <div className="err">{err}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? 'Saving...' : newVersion ? 'Save as new version' : 'Save process'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function MistakeRegister() {
   const { user, can } = useAuth()
   const isAdmin = can('tasks.view_all')
   const canLog = can('tasks.assign')

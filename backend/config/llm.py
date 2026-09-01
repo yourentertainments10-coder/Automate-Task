@@ -52,7 +52,7 @@ def model() -> str:
     return {"nvidia": "nvidia/nemotron-3-nano-30b-a3b",
             "openai": "gpt-4o-mini",
             "groq": "llama-3.3-70b-versatile",
-            "gemini": "gemini-2.0-flash-lite",
+            "gemini": "gemini-3.5-flash-lite",
             "openrouter": "google/gemma-3-27b-it:free",
             }.get(provider(), "claude-sonnet-5")
 
