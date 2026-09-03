@@ -237,7 +237,7 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 }
 .tab.on { color: var(--accent); border-bottom-color: var(--accent); }
 
-.note-input { display: flex; gap: 8px; margin-bottom: 12px; }
+.note-input { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
 .note-input textarea {
   resize: none; height: 38px; flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
 }
@@ -673,11 +673,64 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid .wide { grid-column: 1 / -1; }
 .form-grid label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
-.form-grid input, .form-grid select {
+.form-grid input, .form-grid select, .form-grid textarea {
   width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; background: var(--surface);
 }
 .form-grid input:disabled { background: var(--bg); color: var(--muted); }
-.form-grid input:focus, .form-grid select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.form-grid input:focus, .form-grid select:focus,
+.form-grid textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+/* Prose fields are textareas so Enter starts a new line. Let people drag them
+   taller, but never wider -- horizontal resize breaks the grid. */
+.form-grid textarea { resize: vertical; min-height: 62px; line-height: 1.5; }
+/* A label with a small action beside it (e.g. Description + spell check) */
+.label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.label-row label { margin-bottom: 4px; }
+.linkish {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; color: var(--accent);
+}
+.linkish:hover:not(:disabled) { text-decoration: underline; }
+.linkish:disabled { color: var(--muted); cursor: default; }
+
+/* Every prose box in the app, wherever it sits -- matches the form fields so
+   a textarea outside a .form-grid does not need its own inline styles. */
+.prose-field {
+  width: 100%; border: 1px solid var(--line); border-radius: 9px;
+  padding: 9px 11px; background: var(--surface);
+  resize: vertical; min-height: 62px; line-height: 1.5;
+}
+.prose-field:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+/* Spell check. "ABC✓" is the same glyph Word and Outlook use, so it reads as
+   spelling rather than as an edit pencil. */
+.spell-btn {
+  position: relative; flex: none; cursor: pointer;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
+  padding: 2px 8px; font: 700 11.5px/1.6 inherit; letter-spacing: .02em;
+  color: var(--accent);
+}
+.spell-btn:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.spell-btn:disabled { color: var(--muted); border-color: var(--line); cursor: default; }
+
+/* The label only appears where there is a real cursor and room for it --
+   laptops and tablets. Phones get the icon alone; hovering is not a thing. */
+@media (hover: hover) and (min-width: 768px) {
+  .spell-btn::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 7px); right: 0;
+    background: var(--ink); color: var(--surface);
+    font: 600 11.5px/1 inherit; letter-spacing: normal;
+    padding: 6px 9px; border-radius: 6px; white-space: nowrap;
+    opacity: 0; visibility: hidden; transition: opacity .12s;
+    pointer-events: none; z-index: 40;
+  }
+  .spell-btn:hover::after, .spell-btn:focus-visible::after { opacity: 1; visibility: visible; }
+}
+@media (prefers-reduced-motion: reduce) { .spell-btn::after { transition: none; } }
+
+/* Text a person typed by hand: keep their line breaks, wrap long words. */
+.prose { white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 /* Change-request card: one proposed change per line, "Label: old → new" */

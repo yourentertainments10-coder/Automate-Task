@@ -23,6 +23,22 @@ SUMMARY_SYSTEM = """You summarize one CRM task's state for a busy manager.
 Reply with ONLY a JSON object: {"summary": "<3-5 short sentences: what the task is,
 where it stands, what happened recently, what should happen next>"}"""
 
+# Deliberately narrow. People here write in Indian-English business register
+# and often mix in Hindi words -- "rewrite" would flatten that into something
+# they did not say, and they would stop trusting the button.
+PROOFREAD_SYSTEM = """You proofread short internal notes written by staff at an
+Indian auto-parts business. Fix ONLY spelling, grammar, capitalisation and
+punctuation.
+
+Rules you must not break:
+- Never reword, shorten, expand or reorder anything.
+- Keep every line break exactly where it is.
+- Keep Hindi/Hinglish words, names, part numbers, codes and abbreviations as-is.
+- Indian English is correct English. Do not Americanise it.
+- If the text is already correct, return it unchanged.
+
+Reply with ONLY the corrected text. No quotes, no explanation, no preamble."""
+
 
 
 
@@ -93,3 +109,29 @@ def review_sentence(r: dict) -> str:
     if (on_time or 0) < 50 or r["overdue"] > r["total"] / 2:
         return "Slow — give one task at a time and review daily."
     return "Steady — keep the current load, review effort values."
+
+
+def proofread(text: str) -> dict:
+    """Spelling/grammar pass over a description a person typed.
+
+    Returns {"text", "changed", "provider"}. When AI is off or the call fails
+    the original text comes back with changed=False -- a proofreader that
+    cannot reach the model must hand back what it was given, never an error
+    and never an empty box.
+    """
+    original = (text or "").strip()
+    if not original:
+        return {"text": "", "changed": False, "provider": "rules"}
+
+    fixed = llm.chat(PROOFREAD_SYSTEM, original, max_tokens=900)
+    if not fixed:
+        return {"text": original, "changed": False, "provider": "rules"}
+
+    fixed = fixed.strip()
+    # A model that "helpfully" rewrites or truncates is worse than no model.
+    # Length is the cheap tell: a proofread never changes size much.
+    if not fixed or not (0.5 <= len(fixed) / len(original) <= 1.8):
+        log.warning("proofread rejected: %d chars in, %d out", len(original), len(fixed))
+        return {"text": original, "changed": False, "provider": "rules"}
+
+    return {"text": fixed, "changed": fixed != original, "provider": llm.provider()}

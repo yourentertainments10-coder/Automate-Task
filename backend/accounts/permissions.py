@@ -62,14 +62,35 @@ ROLE_CAPABILITIES = {
     Role.RIDER: {
         "tasks.view_own", "notifications.view",
     },
+    # Housekeeping: their own work and nothing else -- no pipeline, no team,
+    # no reports. Widen deliberately if the job actually needs more.
+    Role.HOUSEKEEPING: {
+        "tasks.view_own", "notifications.view",
+    },
+    # Security: their own work and nothing else -- no pipeline, no team,
+    # no reports. Widen deliberately if the job actually needs more.
+    Role.SECURITY: {
+        "tasks.view_own", "notifications.view",
+    },
+    # Legal: their own work and nothing else -- no pipeline, no team,
+    # no reports. Widen deliberately if the job actually needs more.
+    Role.LEGAL: {
+        "tasks.view_own", "notifications.view",
+    },
+    # HR Executive: their own work and nothing else -- no pipeline, no team,
+    # no reports. Widen deliberately if the job actually needs more.
+    Role.HR_EXECUTIVE: {
+        "tasks.view_own", "notifications.view",
+    },
     Role.DEVELOPER: {
         "tasks.view_own", "notifications.view",
     },
     # Dedicated HR: full leave/attendance powers company-wide, and no access
-    # to the sales pipeline at all (separation of duties).
+    # to the sales pipeline at all (separation of duties). Assigns tasks like
+    # any other manager -- ROLE_LEVEL(2) already stops that at the admins.
     Role.HR_MANAGER: {
         "hr.manage", "hr.approve", "users.manage",
-        "tasks.view_own", "notifications.view",
+        "tasks.view_own", "tasks.assign", "notifications.view",
     },
 }
 

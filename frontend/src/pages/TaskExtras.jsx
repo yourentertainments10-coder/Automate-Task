@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, apiUpload, errorText } from '../api'
-import { fmtEffort } from './Tasks'
+import { fmtEffort, nowForInput } from './Tasks'
+import ProofreadText from '../ProofreadText'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -73,10 +74,8 @@ export function CompleteModal({ task, settings, onClose, onDone }) {
         <p className="muted small">{task.title}</p>
         <div className="form-grid">
           <div className="wide">
-            <label>What was done? *</label>
-            <textarea rows={3} value={remarks} onChange={e => setRemarks(e.target.value)}
-              style={{ width: '100%', border: '1px solid var(--line)', borderRadius: 9, padding: '9px 11px' }}
-              placeholder="e.g. Delivered the quotation and confirmed on call" />
+            <ProofreadText label="What was done? *" value={remarks} onChange={setRemarks}
+              rows={3} placeholder="e.g. Delivered the quotation and confirmed on call" />
           </div>
           <div>
             <label>Assigned task time</label>
@@ -182,10 +181,8 @@ export function ProgressModal({ task, onClose, onDone }) {
             </div>
           </div>
           <div className="wide">
-            <label>Comments</label>
-            <textarea rows={2} value={comment} onChange={e => setComment(e.target.value)}
-              style={{ width: '100%', border: '1px solid var(--line)', borderRadius: 9, padding: '9px 11px' }}
-              placeholder="e.g. waiting on vendor confirmation" />
+            <ProofreadText label="Comments" value={comment} onChange={setComment}
+              rows={2} placeholder="e.g. waiting on vendor confirmation" />
           </div>
         </div>
         {err && <div className="err">{err}</div>}
@@ -258,7 +255,13 @@ export function RequestChangeModal({ task, team, user, isAdmin = false, onClose,
         <div className="form-grid">
           <div>
             <label>New due date</label>
-            <input type="datetime-local" value={f.due_at} onChange={set('due_at')} disabled={f.cancel} />
+            <input type="datetime-local" value={f.due_at} onChange={set('due_at')}
+              min={nowForInput()} disabled={f.cancel} />
+            {f.due_at && new Date(f.due_at) <= new Date() && (
+              <div className="err" style={{ margin: '4px 0 0' }}>
+                That time has already passed — check AM/PM.
+              </div>
+            )}
           </div>
           <div>
             <label>New priority</label>
@@ -299,8 +302,8 @@ export function RequestChangeModal({ task, team, user, isAdmin = false, onClose,
           </div>
           {!isAdmin && (
             <div className="wide">
-              <label>Reason *</label>
-              <input value={f.reason} onChange={set('reason')}
+              <ProofreadText label="Reason *" value={f.reason} rows={2}
+                onChange={v => setF(prev => ({ ...prev, reason: v }))}
                 placeholder="e.g. Deadline was set to midnight by mistake" />
             </div>
           )}

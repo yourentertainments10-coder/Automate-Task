@@ -6,6 +6,7 @@ import {
 import { Bar } from 'react-chartjs-2'
 import { api, apiUpload, errorText } from '../api'
 import { useAuth } from '../auth'
+import ProofreadText from '../ProofreadText'
 import Directory from './Directory'
 import PersonProfile from './PersonProfile'
 import TaskDetailPanel from './TaskDetail'
@@ -35,6 +36,13 @@ export const fmtEffort = (min) => {
   if (min < 60) return `${min}m`
   return min % 60 === 0 ? `${min / 60}h` : `${Math.floor(min / 60)}h ${min % 60}m`
 }
+/* A deadline in the past is nearly always an AM/PM slip (5 PM typed as
+   5 AM). The browser's own picker blocks it before anyone submits. */
+export const nowForInput = () => {
+  const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+  return d.toISOString().slice(0, 16)
+}
+
 const PRIORITIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']]
 const FREQUENCIES = [['one_time', 'One time'], ['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']]
 const RANGES = [
@@ -579,7 +587,7 @@ function TaskList({ scope, prefill, people = [], clearPrefill, preset, clearPres
                   <span className="prio prio-high" title="Pending change request">✎ {t.pending_change_requests}</span>
                 )}
               </div>
-              {t.description && <div className="small muted">{t.description}</div>}
+              {t.description && <div className="small muted prose">{t.description}</div>}
               {t.completion_note && <div className="small muted">📝 {t.completion_note}</div>}
               <div className="when">
                 {scope === 'all' && t.assigned_to_detail ? (
@@ -956,9 +964,9 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
             <input value={f.title} onChange={set('title')} autoFocus placeholder="e.g. Call Ravi with revised quote" />
           </div>
           <div className="wide">
-            <label>Description *</label>
-            <input value={f.description} onChange={set('description')} required
-              placeholder="What exactly has to be done?" />
+            <ProofreadText label="Description *" value={f.description} rows={4} required
+              onChange={v => setF(prev => ({ ...prev, description: v }))}
+              placeholder="What exactly has to be done?&#10;Press Enter for a new line — write as many points as you need." />
           </div>
           <div>
             <label>Department</label>
@@ -1058,7 +1066,13 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
           </div>
           <div>
             <label>Due * {f.frequency !== 'one_time' && '(first occurrence)'}</label>
-            <input type="datetime-local" value={f.due_at} onChange={set('due_at')} required />
+            <input type="datetime-local" value={f.due_at} onChange={set('due_at')}
+              min={nowForInput()} required />
+            {f.due_at && new Date(f.due_at) <= new Date() && (
+              <div className="err" style={{ margin: '4px 0 0' }}>
+                That time has already passed — check AM/PM.
+              </div>
+            )}
           </div>
           {f.frequency !== 'one_time' && (
             <div>
@@ -1157,7 +1171,9 @@ function TemplateModal({ onClose, onSaved }) {
           <div><label>Template name *</label><input value={f.name} onChange={set('name')} autoFocus /></div>
           <div><label>Category</label><input value={f.category} onChange={set('category')} placeholder="e.g. Calls" /></div>
           <div className="wide"><label>Task title *</label><input value={f.title} onChange={set('title')} /></div>
-          <div className="wide"><label>Description</label><input value={f.description} onChange={set('description')} /></div>
+          <div className="wide">
+            <ProofreadText label="Description" value={f.description} rows={3}
+              onChange={v => setF(prev => ({ ...prev, description: v }))} /></div>
           <div>
             <label>Priority</label>
             <select value={f.priority} onChange={set('priority')}>

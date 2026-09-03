@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
 import { useDepartments } from '../useDepartments'
+import { useRoles } from '../useRoles'
+import ProofreadText from '../ProofreadText'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -12,17 +14,6 @@ const toLocalInput = (iso) => {
   const pad = (x) => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
-
-const ROLES = [
-  ['admin', 'Admin'], ['hr_manager', 'HR Manager'],
-  ['sales_manager', 'Sales Manager'], ['sales_executive', 'Sales'],
-  ['purchase_manager', 'Purchase Manager'], ['accounts_manager', 'Accounts Manager'],
-  ['developer_manager', 'Developer Manager'],
-  ['purchase', 'Purchase Team'], ['accounts', 'Accounts'],
-  ['it_lead', 'IT Lead'], ['developer', 'Developer'],
-  ['warehouse_manager', 'Warehouse Manager'], ['warehouse', 'Warehouse Team'],
-  ['rider', 'Rider'],
-]
 
 export default function Notices() {
   const { can } = useAuth()
@@ -167,6 +158,7 @@ function NoticeManage() {
 }
 
 function NoticeModal({ initial, onClose, onSaved }) {
+  const { rows: ROLES } = useRoles()
   const DEPARTMENTS = useDepartments()
   const [f, setF] = useState(initial ? {
     title: initial.title, content: initial.content, category: initial.category,
@@ -211,9 +203,8 @@ function NoticeModal({ initial, onClose, onSaved }) {
         <div className="form-grid">
           <div className="wide"><label>Title *</label><input value={f.title} onChange={set('title')} autoFocus /></div>
           <div className="wide">
-            <label>Content</label>
-            <textarea rows={4} style={{ width: '100%', border: '1px solid var(--line)', borderRadius: 9, padding: '9px 11px' }}
-              value={f.content} onChange={set('content')} />
+            <ProofreadText label="Content" value={f.content} rows={4}
+              onChange={v => setF(prev => ({ ...prev, content: v }))} />
           </div>
           <div><label>Category</label><input value={f.category} onChange={set('category')} placeholder="e.g. HR, Policy" /></div>
           <div>

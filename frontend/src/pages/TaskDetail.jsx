@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, apiUpload, errorText } from '../api'
 import { CompleteModal, ProgressModal, RequestChangeModal } from './TaskExtras'
 import { fmtEffort, relDue } from './Tasks'
+import ProofreadText from '../ProofreadText'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -142,12 +143,9 @@ export default function TaskDetailPanel({ taskId, user, team, settings,
                 <div className="modal-card" style={{ width: 460 }}>
                   <h2 style={{ fontSize: 18 }}>Step done</h2>
                   <p className="muted small" style={{ margin: '4px 0 10px' }}>{ticking.text}</p>
-                  <label>What did you do? *</label>
-                  <textarea rows={3} value={stepNote} autoFocus
-                    style={{ width: '100%', border: '1px solid var(--line)',
-                             borderRadius: 9, padding: '8px 11px' }}
-                    placeholder="e.g. Collected the invoice copy and filed it under Aug"
-                    onChange={e => setStepNote(e.target.value)} />
+                  <ProofreadText label="What did you do? *" value={stepNote} rows={3} autoFocus
+                    onChange={setStepNote}
+                    placeholder="e.g. Collected the invoice copy and filed it under Aug" />
                   <div className="modal-actions">
                     <button className="btn" onClick={() => { setTicking(null); setStepNote('') }}>Cancel</button>
                     <button className="btn btn-primary" disabled={stepNote.trim().length < 5}

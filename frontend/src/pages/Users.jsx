@@ -4,6 +4,7 @@ import { useAuth } from '../auth'
 import PersonProfile from './PersonProfile'
 import { WorkloadPanel } from './TaskExtras'
 import { useDepartments } from '../useDepartments'
+import { useRoles } from '../useRoles'
 
 /* C2: fetch-on-expand workload for one team member */
 function WorkloadCell({ userId }) {
@@ -17,23 +18,6 @@ function WorkloadCell({ userId }) {
   if (!w) return <div className="muted small">Loading workload…</div>
   return <WorkloadPanel w={w} />
 }
-
-const ROLES = [
-  ['admin', 'Admin'],
-  ['hr_manager', 'HR Manager'],
-  ['sales_manager', 'Sales Manager'],
-  ['purchase_manager', 'Purchase Manager'],
-  ['accounts_manager', 'Accounts Manager'],
-  ['developer_manager', 'Developer Manager'],
-  ['sales_executive', 'Sales'],
-  ['purchase', 'Purchase Team'],
-  ['accounts', 'Accounts'],
-  ['it_lead', 'IT Lead'],
-  ['warehouse_manager', 'Warehouse Manager'],
-  ['warehouse', 'Warehouse Team'],
-  ['rider', 'Rider'],
-  ['developer', 'Developer'],
-]
 
 const EMPTY = {
   username: '', email: '', first_name: '', last_name: '',
@@ -49,6 +33,7 @@ export default function Users() {
 /* ---------- Read-only directory (every role) ---------- */
 
 function Directory() {
+  const { rows: ROLES } = useRoles()
   const { user } = useAuth()
   const isManager = user.role === 'sales_manager'
   const [rows, setRows] = useState(null)
@@ -136,6 +121,7 @@ function Directory() {
 /* ---------- Admin management ---------- */
 
 function ManageTeam() {
+  const { rows: ROLES, managerRoles } = useRoles()
   const { user: me } = useAuth()
   const [rows, setRows] = useState([])
   const [editing, setEditing] = useState(null)   // null | 'new' | user object
@@ -154,10 +140,10 @@ function ManageTeam() {
   }
   useEffect(() => { load() }, [])
 
+  // level 2 and up, decided by the backend -- a new manager role lands here
+  // without anyone remembering to add it
   const managers = useMemo(() =>
-    rows.filter(u => ['admin', 'sales_manager', 'hr_manager', 'it_lead',
-                      'warehouse_manager', 'purchase_manager', 'accounts_manager',
-                      'developer_manager'].includes(u.role) && u.is_active), [rows])
+    rows.filter(u => managerRoles.includes(u.role) && u.is_active), [rows, managerRoles])
 
   const shown = useMemo(() => rows.filter(u => {
     if (fRole && u.role !== fRole) return false
@@ -266,6 +252,7 @@ function ManageTeam() {
 }
 
 function UserModal({ initial, managers, onClose, onSaved }) {
+  const { rows: ROLES } = useRoles()
   const DEPARTMENTS = useDepartments()
   const [f, setF] = useState(initial
     ? { ...EMPTY, ...initial, reporting_manager: initial.reporting_manager || '', password: '' }

@@ -14,7 +14,7 @@ from accounts.models import User
 from accounts.permissions import HasCapability, has_capability
 from notifications.service import notify
 
-from .ai_tasks import draft_task, review_sentence, summarize_task
+from .ai_tasks import draft_task, proofread, review_sentence, summarize_task
 from .models import (
     ChangeRequestStatus, EventType, Holiday, LeadEvent, Task, TaskActivity,
     TaskAttachment, TaskCategory, TaskChangeRequest, TaskChecklistItem,
@@ -354,8 +354,15 @@ class TaskViewSet(viewsets.ModelViewSet):
             missing["effort_minutes"] = "Effort is required — how long should this task take?"
         # No due date means no reminder, no overdue flag and no on-time score,
         # so the task quietly falls out of every report. Make it mandatory.
-        if not serializer.validated_data.get("due_at"):
+        due = serializer.validated_data.get("due_at")
+        if not due:
             missing["due_at"] = "Due date is required — reminders and on-time scoring need it."
+        elif due <= timezone.now():
+            local = timezone.localtime(due)
+            missing["due_at"] = (
+                f"That deadline is already past ({local:%d %b %Y, %I:%M %p}). "
+                "Check AM/PM — did you mean "
+                f"{(local + timedelta(hours=12)):%I:%M %p}?")
         if missing:
             raise ValidationError(missing)
         serializer.validated_data["category"] = self._resolve_category(
@@ -663,6 +670,18 @@ class TaskViewSet(viewsets.ModelViewSet):
             raise ValidationError({"prompt": "Describe the task in your own words."})
         return Response(draft_task(prompt))
 
+    @action(detail=False, methods=["post"])
+    def proofread(self, request):
+        """Spelling and grammar pass over whatever a person typed. The browser
+        underlines mistakes but only offers fixes on right-click, which nobody
+        finds -- this is the button they were looking for."""
+        text = str(request.data.get("text", ""))
+        if not text.strip():
+            raise ValidationError({"text": "Nothing to check."})
+        if len(text) > 4000:
+            raise ValidationError({"text": "Too long to check — keep it under 4000 characters."})
+        return Response(proofread(text))
+
     @action(detail=True, methods=["post"])
     def summarize(self, request, pk=None):
         task = self.get_object()
@@ -936,10 +955,14 @@ class TaskViewSet(viewsets.ModelViewSet):
         today = timezone.localtime(now).date()
 
         raw = Task.objects.filter(assigned_to__in=users, deleted_at__isnull=True) \
-            .values("assigned_to_id", "created_by_id", "status", "due_at",
+            .values("id", "assigned_to_id", "created_by_id", "status", "due_at",
                     "completed_at", "created_at", "effort_minutes", "actual_minutes",
                     "group__name")
         users_by_id = {u.pk: u for u in users}
+        # tasks that exist only to correct a mistake are not scored -- the
+        # mistake penalty already covers it (same rule as crm.scoring)
+        from .scoring import corrective_task_ids
+        corrective = corrective_task_ids([t["id"] for t in raw])
         per = {u.pk: [] for u in users}
         for t in raw:
             anchor = timezone.localtime(t["due_at"] or t["created_at"]).date()
@@ -1047,7 +1070,8 @@ class TaskViewSet(viewsets.ModelViewSet):
             sc_assigned = sc_earned = sc_completed = sc_in_time = 0
             intervals = []
             for t in sub:
-                own = t["created_by_id"] == uid          # self-assigned
+                # not scored: your own task, or one raised to correct a mistake
+                own = t["created_by_id"] == uid or t["id"] in corrective
                 if own:
                     c["self_assigned"] += 1
                 if t["status"] != TaskStatus.DONE and t["due_at"] and t["due_at"] < now:
@@ -1149,7 +1173,8 @@ class TaskViewSet(viewsets.ModelViewSet):
                        f"− mistake penalty (low 1 · medium 3 · high 6 · critical 10, "
                        f"repeats ×2, max {MAX_EMPLOYEE_PENALTY}). "
                        f"Only tasks assigned BY SOMEONE ELSE are scored — a task "
-                       f"you create for yourself earns no points",
+                       f"you create for yourself, or one raised to correct a "
+                       f"mistake, earns no points",
         })
 
     @action(detail=False, methods=["get"])

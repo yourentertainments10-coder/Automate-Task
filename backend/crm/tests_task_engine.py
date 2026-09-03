@@ -434,3 +434,136 @@ class CompletionEvidenceTests(Base):
                                {"require_completion_remarks": True}, format="json")
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["require_completion_remarks"])
+
+
+class PastDeadlineTests(Base):
+    """A real slip on 03 Sep: a manager assigning at 11 AM set the deadline to
+    5:00 AM instead of 5:00 PM. The task saved silently and was born overdue.
+    A deadline in the past is never intentional, so both doors refuse it."""
+
+    def test_creating_with_a_past_deadline_is_rejected(self):
+        res = self.create_task(
+            self.manager, self.rahul,
+            due_at=(timezone.now() - timedelta(hours=6)).isoformat())
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("AM/PM", str(res.data["due_at"]))
+
+    def test_the_message_names_the_time_twelve_hours_on(self):
+        """5:00 AM was typed; the hint has to say 5:00 PM or it is no help."""
+        five_am = timezone.localtime(timezone.now()).replace(
+            hour=5, minute=0, second=0, microsecond=0)
+        if five_am >= timezone.localtime(timezone.now()):
+            five_am -= timedelta(days=1)
+        res = self.create_task(self.manager, self.rahul, due_at=five_am.isoformat())
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("05:00 PM", str(res.data["due_at"]))
+
+    def test_a_deadline_minutes_ahead_still_saves(self):
+        """Only the past is refused -- a genuinely tight deadline is allowed."""
+        res = self.create_task(
+            self.manager, self.rahul,
+            due_at=(timezone.now() + timedelta(minutes=20)).isoformat())
+        self.assertEqual(res.status_code, 201)
+
+    def test_change_request_cannot_move_a_deadline_into_the_past(self):
+        task = Task.objects.create(
+            title="Report", assigned_to=self.rahul, created_by=self.manager,
+            due_at=timezone.now() + timedelta(days=1))
+        self.as_(self.rahul)
+        res = self.client.post(
+            f"/api/tasks/{task.id}/request_change/",
+            {"changes": {"due_at": (timezone.now() - timedelta(hours=2)).isoformat()},
+             "reason": "the deadline moved"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("AM/PM", str(res.data))
+
+
+class HrManagerAssignTests(Base):
+    """HR runs company-wide processes (induction, documents, PIP follow-ups),
+    so the HR Manager assigns like any other manager -- but level 2 still
+    stops at the admins."""
+
+    def test_hr_manager_can_assign_to_staff(self):
+        res = self.create_task(self.hr, self.rahul)
+        self.assertEqual(res.status_code, 201)
+
+    def test_hr_manager_can_assign_across_departments(self):
+        res = self.create_task(self.hr, self.vikram)     # hr -> purchase
+        self.assertEqual(res.status_code, 201)
+
+    def test_hr_manager_can_assign_to_a_fellow_manager(self):
+        res = self.create_task(self.hr, self.manager)
+        self.assertEqual(res.status_code, 201)
+
+    def test_hr_manager_still_cannot_assign_to_an_admin(self):
+        res = self.create_task(self.hr, self.admin)
+        self.assertEqual(res.status_code, 403)   # authority, not bad input
+
+    def test_hr_manager_sees_the_tasks_they_gave_out(self):
+        self.create_task(self.hr, self.rahul, title="Collect PAN card")
+        self.as_(self.hr)
+        titles = [t["title"] for t in self.client.get("/api/tasks/").data["results"]]
+        self.assertIn("Collect PAN card", titles)
+
+    def test_admin_is_not_offered_in_the_hr_assignee_list(self):
+        self.as_(self.hr)
+        ids = {u["id"] for u in self.client.get("/api/tasks/assignees/").data}
+        self.assertIn(self.rahul.id, ids)
+        self.assertNotIn(self.admin.id, ids)
+
+
+class ProofreadTests(Base):
+    """The browser underlines a misspelling but only offers the fix on
+    right-click, which nobody finds. This endpoint is that fix as a button."""
+
+    def test_empty_text_is_rejected(self):
+        self.as_(self.rahul)
+        res = self.client.post("/api/tasks/proofread/", {"text": "   "}, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_very_long_text_is_rejected(self):
+        self.as_(self.rahul)
+        res = self.client.post("/api/tasks/proofread/", {"text": "a" * 4001}, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_with_ai_off_the_text_comes_back_untouched(self):
+        """AI is off in tests. A proofreader that cannot reach the model must
+        hand back what it was given -- never an error, never an empty box."""
+        self.as_(self.rahul)
+        res = self.client.post("/api/tasks/proofread/",
+                               {"text": "chek the invoce"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["text"], "chek the invoce")
+        self.assertFalse(res.data["changed"])
+
+    def test_a_rewritten_reply_is_thrown_away(self):
+        """A model that rewrites instead of proofreading is worse than none.
+        Anything wildly longer or shorter is refused and the original kept."""
+        from unittest import mock
+        with mock.patch("crm.ai_tasks.llm.chat", return_value="Hi."):
+            self.as_(self.rahul)
+            long_text = "Please chek the invoce of Ravi and send the quatation tommorow."
+            res = self.client.post("/api/tasks/proofread/",
+                                   {"text": long_text}, format="json")
+        self.assertEqual(res.data["text"], long_text)
+        self.assertFalse(res.data["changed"])
+
+    def test_a_genuine_correction_is_returned(self):
+        from unittest import mock
+        fixed = "Check the invoice."
+        with mock.patch("crm.ai_tasks.llm.chat", return_value=fixed):
+            self.as_(self.rahul)
+            res = self.client.post("/api/tasks/proofread/",
+                                   {"text": "chek the invoce."}, format="json")
+        self.assertEqual(res.data["text"], fixed)
+        self.assertTrue(res.data["changed"])
+
+    def test_line_breaks_survive(self):
+        from unittest import mock
+        text = "Call the vendor.\nConfirm the delivery date."
+        with mock.patch("crm.ai_tasks.llm.chat", return_value=text):
+            self.as_(self.rahul)
+            res = self.client.post("/api/tasks/proofread/",
+                                   {"text": "Call the vender.\nConfrim the delivery date."},
+                                   format="json")
+        self.assertEqual(res.data["text"].count("\n"), 1)

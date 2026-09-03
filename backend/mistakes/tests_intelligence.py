@@ -64,15 +64,16 @@ class RuleTests(TestCase):
     def test_second_time_counts_as_a_repeat_and_asks_for_training(self):
         self.log_one()
         m2 = self.log_one("Wrong item name entered again")
-        self.assertEqual(m2.occurrence_level, 2)
-        self.assertIsNotNone(m2.repeat_of)          # linked to the earlier one
+        self.assertEqual(intel.occurrence_count(m2), 2)
+        self.assertEqual(m2.occurrence_level, 1)    # a human confirms the link
+        self.assertIsNone(m2.repeat_of)
         note = Notification.objects.get(user=self.mgr, type="mistake_repeat")
         self.assertIn("repeated", note.title)
         self.assertIn("2", note.body)
 
     def test_third_time_proposes_a_pip_without_imposing_one(self):
         self.log_one(); self.log_one("again"); m3 = self.log_one("third time")
-        self.assertEqual(m3.occurrence_level, 3)
+        self.assertEqual(intel.occurrence_count(m3), 3)
         note = Notification.objects.filter(
             user=self.mgr, type="mistake_repeat").order_by("-id").first()
         self.assertIn("PIP", note.title)

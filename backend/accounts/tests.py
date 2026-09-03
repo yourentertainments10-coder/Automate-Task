@@ -238,3 +238,98 @@ class DepartmentListTests(TestCase):
         self.assertEqual(self.client.delete("/api/departments/logistics/").status_code, 200)
         codes = [d["code"] for d in self.client.get("/api/departments/").data]
         self.assertNotIn("logistics", codes)
+
+
+class RoleWiringTests(TestCase):
+    """A role lives in three places: the choices, the capability matrix and
+    the assignment level. Miss one and the person is either uncreatable or
+    silently gets the wrong access — so walk every role and check all three."""
+
+    def test_every_role_has_capabilities(self):
+        from .permissions import ROLE_CAPABILITIES
+        missing = [r.value for r in Role if r not in ROLE_CAPABILITIES]
+        self.assertEqual(missing, [],
+                         f"roles with no entry in ROLE_CAPABILITIES: {missing}")
+
+    def test_every_role_has_a_sane_assignment_level(self):
+        from crm.scoping import ROLE_LEVEL, assignment_level
+        for r in Role:
+            lvl = ROLE_LEVEL.get(r, 1)
+            self.assertIn(lvl, (1, 2, 3), f"{r.value} has level {lvl}")
+        # a manager-sounding role must not silently sit at staff level
+        for r in Role:
+            if r.value.endswith("_manager") or r.value in ("admin", "it_lead"):
+                self.assertGreaterEqual(
+                    ROLE_LEVEL.get(r, 1), 2,
+                    f"{r.value} looks senior but can only assign at staff level")
+
+    def test_every_role_has_a_default_department(self):
+        from .models import ROLE_DEFAULT_DEPARTMENT
+        missing = [r.value for r in Role if r not in ROLE_DEFAULT_DEPARTMENT]
+        self.assertEqual(missing, [],
+                         f"roles with no default department: {missing}")
+
+    def test_the_new_staff_roles_see_only_their_own_work(self):
+        from .permissions import ROLE_CAPABILITIES
+        for role in (Role.HOUSEKEEPING, Role.SECURITY, Role.LEGAL, Role.HR_EXECUTIVE):
+            caps = ROLE_CAPABILITIES[role]
+            self.assertEqual(caps, {"tasks.view_own", "notifications.view"},
+                             f"{role.value} has more access than intended: {caps}")
+
+    def test_a_user_can_actually_be_created_with_each_new_role(self):
+        self.client = APIClient()
+        res = self.client.post("/api/auth/login",
+                               {"username": "boss", "password": "pass@12345"})
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {res.data['access']}")
+        for i, role in enumerate((Role.HOUSEKEEPING, Role.SECURITY,
+                                  Role.LEGAL, Role.HR_EXECUTIVE)):
+            r = self.client.post("/api/users/", {
+                "username": f"new{i}", "email": f"new{i}@x.com",
+                "password": "sonal@12345", "role": role.value,
+                "department": "warehouse", "whatsapp_phone": f"98765432{i}0",
+                "reporting_manager": self.admin.id})
+            self.assertEqual(r.status_code, 201, f"{role.value}: {r.data}")
+
+    def setUp(self):
+        self.admin = make("boss", Role.ADMIN)
+
+
+class RolesEndpointTests(TestCase):
+    """The role dropdown used to be typed out again in the frontend, so the
+    four roles added on 03 Sep existed in the backend but were missing from
+    every form. The list now comes from here -- these tests are what stops it
+    drifting again."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            "rolecheck", "rolecheck@x.com", "pass@12345",
+            role=Role.SALES_EXECUTIVE, department="sales")
+        res = self.client.post("/api/auth/login",
+                               {"username": "rolecheck", "password": "pass@12345"})
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {res.data['access']}")
+
+    def test_every_role_the_backend_accepts_is_offered(self):
+        served = {r["value"] for r in self.client.get("/api/roles/").data}
+        self.assertEqual(served, {value for value, _ in Role.choices})
+
+    def test_the_roles_added_on_03_sep_are_there(self):
+        served = {r["value"] for r in self.client.get("/api/roles/").data}
+        for role in ("housekeeping", "security", "legal", "hr_executive"):
+            self.assertIn(role, served)
+
+    def test_manager_flag_matches_the_assignment_level(self):
+        from crm.scoping import ROLE_LEVEL
+        for row in self.client.get("/api/roles/").data:
+            self.assertEqual(row["is_manager"], ROLE_LEVEL.get(row["value"], 1) >= 2,
+                             f"{row['value']} disagrees with ROLE_LEVEL")
+
+    def test_labels_are_human_readable(self):
+        rows = self.client.get("/api/roles/").data
+        by_value = {r["value"]: r["label"] for r in rows}
+        self.assertEqual(by_value["security"], "Security")
+        self.assertEqual(by_value["hr_executive"], "HR Executive")
+
+    def test_signed_out_callers_get_nothing(self):
+        self.client.credentials()
+        self.assertEqual(self.client.get("/api/roles/").status_code, 401)

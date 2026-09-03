@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
 import { useDepartments } from '../useDepartments'
+import ProofreadText from '../ProofreadText'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -259,25 +260,21 @@ function SOPModal({ initial, onClose, onSaved }) {
             )}
           </div>
           <div className="wide">
-            <label>Steps * - one per line, in order</label>
-            <textarea required rows={7} value={f.steps} onChange={set('steps')}
-              placeholder={SOP_STEP_HINT} />
-            <div className="muted small">
-              Say what to do AND what done-correctly looks like. Two lines minimum.
-            </div>
+            <ProofreadText label="Steps * - one per line, in order" value={f.steps}
+              rows={7} required onChange={v => setF(prev => ({ ...prev, steps: v }))}
+              placeholder={SOP_STEP_HINT}
+              hint="Say what to do AND what done-correctly looks like. Two lines minimum." />
           </div>
           <div className="wide">
-            <label>Check before calling it done</label>
-            <textarea rows={3} value={f.checks} onChange={set('checks')}
+            <ProofreadText label="Check before calling it done" value={f.checks} rows={3}
+              onChange={v => setF(prev => ({ ...prev, checks: v }))}
               placeholder="Voucher total equals the invoice total to the paisa" />
           </div>
           <div className="wide">
-            <label>Mistakes people make here</label>
-            <textarea rows={3} value={f.common_errors} onChange={set('common_errors')}
-              placeholder="Part name typed instead of the part code" />
-            <div className="muted small">
-              This is the list a new mistake gets matched against - write the real ones.
-            </div>
+            <ProofreadText label="Mistakes people make here" value={f.common_errors} rows={3}
+              onChange={v => setF(prev => ({ ...prev, common_errors: v }))}
+              placeholder="Part name typed instead of the part code"
+              hint="This is the list a new mistake gets matched against - write the real ones." />
           </div>
         </div>
         {err && <div className="err">{err}</div>}
@@ -804,9 +801,8 @@ function LogMistakeModal({ user, canLogOthers, onClose, onSaved }) {
             </select>
           </div>
           <div className="wide">
-            <label>What happened? *</label>
-            <textarea rows={3} value={f.description} onChange={set('description')}
-              style={{ width: '100%', border: '1px solid var(--line)', borderRadius: 9, padding: '9px 11px' }}
+            <ProofreadText label="What happened? *" value={f.description} rows={3}
+              onChange={v => setF(prev => ({ ...prev, description: v }))}
               placeholder="e.g. Wrong Hyundai part ordered for customer XYZ" />
           </div>
           <div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, apiUpload, errorText } from '../api'
 import { useAuth } from '../auth'
 import { useDepartments } from '../useDepartments'
+import { SpellCheck } from '../ProofreadText'
 
 export const STAGES = [
   ['new', 'New'],
@@ -398,6 +399,7 @@ function LeadDrawer({ lead, canAssign, assignees, onClose, onChanged }) {
                 <div className="note-input">
                   <textarea placeholder="Add a note…" value={note} onChange={e => setNote(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote() } }} />
+                  <SpellCheck value={note} onChange={setNote} />
                   <button className="btn" onClick={addNote}>Save</button>
                 </div>
               )}

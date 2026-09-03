@@ -46,6 +46,23 @@ def departments(request):
     return Response([{"code": d.code, "name": d.name, "active": d.active} for d in rows])
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def roles(request):
+    """The role dropdown, straight off Role.choices and ROLE_LEVEL.
+
+    It used to be typed out again in the frontend, so adding a role to the
+    backend left it missing from every form until somebody noticed. Reading it
+    from here means a new role appears everywhere the moment it exists.
+    """
+    from crm.scoping import ROLE_LEVEL
+    return Response([
+        {"value": value, "label": label, "level": ROLE_LEVEL.get(value, 1),
+         "is_manager": ROLE_LEVEL.get(value, 1) >= 2}
+        for value, label in Role.choices
+    ])
+
+
 @api_view(["PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
 def department_detail(request, code):

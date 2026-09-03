@@ -260,6 +260,21 @@ class TaskChangeRequestSerializer(serializers.ModelSerializer):
                 "(e.g. \"customer moved the deadline\").")
         return text
 
+    def _check_due(self, value):
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from django.utils.dateparse import parse_datetime
+        due = value if hasattr(value, "year") else parse_datetime(str(value))
+        if due and timezone.is_naive(due):
+            due = timezone.make_aware(due)
+        if due and due <= timezone.now():
+            local = timezone.localtime(due)
+            raise serializers.ValidationError(
+                f"That deadline is already past ({local:%d %b %Y, %I:%M %p}). "
+                f"Check AM/PM — did you mean "
+                f"{(local + timedelta(hours=12)):%I:%M %p}?")
+
     def validate_changes(self, value):
         if not isinstance(value, dict) or not value:
             raise serializers.ValidationError("Propose at least one change.")
@@ -267,6 +282,8 @@ class TaskChangeRequestSerializer(serializers.ModelSerializer):
         if unknown:
             raise serializers.ValidationError(
                 f"These fields cannot be changed via a request: {sorted(unknown)}")
+        if value.get("due_at"):
+            self._check_due(value["due_at"])
         if "effort_minutes" in value and value["effort_minutes"] is not None:
             try:
                 if int(value["effort_minutes"]) < 0:

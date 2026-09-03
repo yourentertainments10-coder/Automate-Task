@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
+import { SpellCheck } from '../ProofreadText'
 
 const fmtDT = (iso) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
@@ -142,6 +143,7 @@ function Comments({ idea }) {
       <div className="note-input">
         <textarea placeholder="Add a comment…" value={body} onChange={e => setBody(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); add() } }} />
+        <SpellCheck value={body} onChange={setBody} />
         <button className="btn" disabled={!body.trim()} onClick={add}>Post</button>
       </div>
     </div>

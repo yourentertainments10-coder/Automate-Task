@@ -174,20 +174,19 @@ class MistakeViewSet(viewsets.ModelViewSet):
         verdict = intel.escalation_for(count)
         prior = intel.prior_mistakes(mistake).first()
 
-        if count > 1:
-            # the SUGGESTION is automatic; a manager still confirms the link
-            mistake.occurrence_level = min(count, 3)
-            if prior and not mistake.repeat_of_id:
-                mistake.repeat_of = prior
-            mistake.escalation_level = max(mistake.escalation_level,
-                                           1 if verdict["suggest_pip"] else 0)
-            mistake.save(update_fields=["occurrence_level", "repeat_of",
-                                        "escalation_level"])
+        # Counting is automatic; LINKING is not. This register was built so a
+        # human confirms 'same error / different error' -- auto-linking took
+        # that decision away and hid the candidate list from the manager.
+        if count > 1 and prior:
             log(mistake, actor,
-                f"Occurrence {count} of '{mistake.category}' for this person "
-                f"\u2014 {verdict['why']}")
+                f"Looks like occurrence {count} of '{mistake.category}' for "
+                f"this person (earlier: {prior.code}) - {verdict['why']} "
+                "A manager still confirms whether it is the same error.")
 
-        # the corrective task, spawned from the log itself
+        # The corrective task, spawned from the log itself. It is kept OUT
+        # of the score (see crm.scoring): the mistake penalty already covers
+        # this error, and charging the effort ratio as well would punish
+        # twice for one mistake, invisibly.
         if mistake.employee and mistake.employee.is_active and not mistake.corrective_task_id:
             due = timezone.now() + timedelta(days=2)
             task = Task.objects.create(
@@ -404,13 +403,24 @@ class MistakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def create_task(self, request, pk=None):
         """Task integration: spawn the corrective/audit task, linked back."""
-        from crm.models import Task
+        from crm.models import Task, TaskStatus
         from crm.scoping import can_assign_to
         mistake = self.get_object()
         if not can_review(request.user, mistake):
             raise PermissionDenied("Only the accountable manager or admin can create the corrective task.")
-        if mistake.corrective_task:
-            raise ValidationError({"detail": f"Corrective task {mistake.corrective_task.code} already exists."})
+        existing = mistake.corrective_task
+        if existing:
+            untouched = (existing.status != TaskStatus.DONE
+                         and not existing.actual_minutes
+                         and existing.deleted_at is None)
+            if not untouched:
+                raise ValidationError({
+                    "detail": f"Corrective task {existing.code} already exists "
+                              "and has been worked on."})
+            existing.deleted_at = timezone.now()
+            existing.save(update_fields=["deleted_at"])
+            log(mistake, request.user,
+                f"Replaced the auto-created corrective task {existing.code}")
         assignee = User.objects.filter(pk=request.data.get("assigned_to"), is_active=True).first() \
             or mistake.employee
         if not can_assign_to(request.user, assignee):
