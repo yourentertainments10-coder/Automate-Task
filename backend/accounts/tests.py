@@ -333,3 +333,73 @@ class RolesEndpointTests(TestCase):
     def test_signed_out_callers_get_nothing(self):
         self.client.credentials()
         self.assertEqual(self.client.get("/api/roles/").status_code, 401)
+
+
+class ContactRequiredTests(TestCase):
+    """Email was flatly required until 03 Sep 2026, when mail to a mailbox IT
+    had not created yet bounced back to the sending account for weeks. A blank
+    address now simply means "no mail" -- the same way a blank phone means no
+    WhatsApp. Blanking BOTH is still refused: that person would never be told
+    anything at all."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            "contact.boss", "boss@x.com", "pass@12345",
+            role=Role.ADMIN, department="management")
+        self.mgr = User.objects.create_user(
+            "contact.mgr", "mgr@x.com", "pass@12345",
+            role=Role.SALES_MANAGER, department="sales")
+        res = self.client.post("/api/auth/login",
+                               {"username": "contact.boss", "password": "pass@12345"})
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {res.data['access']}")
+
+    def body(self, **over):
+        return {"username": "newjoiner", "email": "new@x.com", "password": "pass@12345",
+                "role": Role.SALES_EXECUTIVE, "department": "sales",
+                "whatsapp_phone": "9711539878",
+                "reporting_manager": self.mgr.id, **over}
+
+    def test_a_joiner_with_no_mailbox_yet_can_be_created(self):
+        res = self.client.post("/api/users/", self.body(email=""), format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(User.objects.get(username="newjoiner").email, "")
+
+    def test_a_person_with_no_phone_still_needs_an_email(self):
+        res = self.client.post("/api/users/", self.body(whatsapp_phone=""), format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+
+    def test_blanking_both_is_refused(self):
+        res = self.client.post("/api/users/",
+                               self.body(email="", whatsapp_phone=""), format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("email", res.data)
+
+    def test_an_existing_address_can_be_cleared_when_it_bounces(self):
+        """The actual fix for Jagdish: an admin can turn mail off themselves."""
+        u = User.objects.create_user("bouncer", "dead@cartrends.in", "pass@12345",
+                                     role=Role.SALES_EXECUTIVE, department="sales",
+                                     whatsapp_phone="9711539878",
+                                     reporting_manager=self.mgr)
+        res = self.client.patch(f"/api/users/{u.id}/", {"email": ""}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        u.refresh_from_db()
+        self.assertEqual(u.email, "")
+
+    def test_clearing_the_last_channel_is_still_refused(self):
+        u = User.objects.create_user("lastone", "x@y.com", "pass@12345",
+                                     role=Role.SALES_EXECUTIVE, department="sales",
+                                     whatsapp_phone="", reporting_manager=self.mgr)
+        res = self.client.patch(f"/api/users/{u.id}/", {"email": ""}, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_a_bad_phone_is_still_rejected(self):
+        res = self.client.post("/api/users/", self.body(whatsapp_phone="12345"), format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("whatsapp_phone", res.data)
+
+    def test_no_mail_is_sent_to_a_blank_address(self):
+        from notifications.channels.gmail import send_email
+        out = send_email("", "subject", "body")
+        self.assertEqual(out["status"], "skipped")
+        self.assertIn("no email", out["detail"])

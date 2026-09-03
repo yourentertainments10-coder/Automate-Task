@@ -292,9 +292,12 @@ function UserModal({ initial, managers, onClose, onSaved }) {
             <input value={f.username} onChange={set('username')} disabled={!!initial} autoFocus={!initial} />
           </div>
           <div>
-            <label>Email *</label>
-            <input type="email" required value={f.email} onChange={set('email')} />
-            <div className="muted small">Task and approval mails go here.</div>
+            <label>Email</label>
+            <input type="email" value={f.email} onChange={set('email')} />
+            <div className="muted small">
+              Task and approval mails go here. Leave blank if their mailbox does
+              not exist yet — otherwise every mail bounces back to us.
+            </div>
           </div>
           <div>
             <label>First name</label>

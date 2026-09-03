@@ -98,17 +98,27 @@ class UserWriteSerializer(serializers.ModelSerializer):
         if self.instance is None and not attrs.get("password"):
             errors["password"] = "Password is required for new users."
 
-        if self._checked(attrs, "email")                 and not str(self._current(attrs, "email") or "").strip():
-            errors["email"] = "Email is required — task and approval mails are sent here."
+        # Email used to be flatly required. Real life disagreed: HR adds a
+        # joiner before IT creates the mailbox, and every task mail to that
+        # dead address bounced back to the sending account for weeks. A blank
+        # address is now allowed and simply means "no mail" -- the same way a
+        # blank phone means "no WhatsApp". What is NOT allowed is blanking
+        # both, which would leave the person with no way to be told anything.
+        email = str(self._current(attrs, "email") or "").strip()
+        phone_now = "".join(ch for ch in str(self._current(attrs, "whatsapp_phone") or "")
+                            if ch.isdigit())
+        if not email and not phone_now:
+            errors["email"] = (
+                "Give an email or a WhatsApp number — with neither, this "
+                "person is never told about a task.")
 
         if self._checked(attrs, "whatsapp_phone"):
-            phone = "".join(ch for ch in str(self._current(attrs, "whatsapp_phone") or "")
-                            if ch.isdigit())
-            if not phone:
+            phone = phone_now
+            if not phone and not email:
                 errors["whatsapp_phone"] = (
                     "WhatsApp number is required — without it this person gets "
                     "no WhatsApp alerts.")
-            elif len(phone) not in (10, 12):
+            elif phone and len(phone) not in (10, 12):
                 errors["whatsapp_phone"] = (
                     "Enter a 10-digit mobile number (or 12 digits with the 91 "
                     "country code).")
