@@ -57,13 +57,26 @@ class GroupViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def add_member(self, request, pk=None):
+        """Add one member ({user: id}) or several at once ({users: [id, ...]}).
+        Adding a team one person at a time was a round trip each."""
         group = self.get_object()
         if not can_manage_group(request.user, group):
             raise PermissionDenied("Only the group owner or an admin can add members.")
-        user = User.objects.filter(pk=request.data.get("user"), is_active=True).first()
-        if not user:
-            raise ValidationError({"user": "Unknown or inactive user."})
-        group.members.add(user)
+
+        wanted = request.data.get("users")
+        if wanted is None:
+            wanted = [request.data.get("user")]
+        if not isinstance(wanted, list):
+            raise ValidationError({"users": "Send a list of user ids."})
+        wanted = [w for w in wanted if w not in (None, "")]
+        if not wanted:
+            raise ValidationError({"users": "Pick at least one person."})
+
+        found = list(User.objects.filter(pk__in=wanted, is_active=True))
+        missing = set(map(str, wanted)) - {str(u.pk) for u in found}
+        if missing:
+            raise ValidationError({"users": f"Unknown or inactive: {sorted(missing)}"})
+        group.members.add(*found)
         return Response(GroupSerializer(group, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])

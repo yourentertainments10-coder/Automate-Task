@@ -155,7 +155,14 @@ const TILES = [
    "More", which still shows which tab is active when one is chosen. */
 function TabBar({ tabs, area, setArea }) {
   const [open, setOpen] = useState(false)
-  const PRIMARY = 4
+  // A laptop has room for every tab; only a phone needs the overflow menu.
+  const [narrow, setNarrow] = useState(() => window.innerWidth <= 820)
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth <= 820)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  const PRIMARY = narrow ? 4 : tabs.length
   const front = tabs.slice(0, PRIMARY)
   const rest = tabs.slice(PRIMARY)
   const restActive = rest.find(([v]) => v === area)
@@ -198,7 +205,7 @@ function TabBar({ tabs, area, setArea }) {
 }
 
 /* D3: preset chips + a custom from–to picker, shared by dashboard & reports */
-function RangePicker({ range, setRange, custom, setCustom }) {
+function RangePicker({ range, setRange, custom, setCustom, applied }) {
   return (
     <div className="filters">
       {/* Nine pills wrapped over three rows on a phone. One dropdown says the
@@ -215,8 +222,28 @@ function RangePicker({ range, setRange, custom, setCustom }) {
           <input type="date" value={custom.end} onChange={e => setCustom(c => ({ ...c, end: e.target.value }))} />
         </>
       )}
+      {/* A week that starts on 31 Aug and ends on 6 Sep sits in two months, so
+          a task can be in This Week and not in This Month. Showing the dates
+          the server actually counted makes that obvious instead of baffling. */}
+      {applied?.from && (
+        <span className="range-applied">
+          {fmtRange(applied.from, applied.to)} · counted by due date
+        </span>
+      )}
     </div>
   )
+}
+
+/* "01 Sep – 30 Sep 2026", dropping the year and month when they repeat */
+function fmtRange(from, to) {
+  const a = new Date(from + 'T00:00:00')
+  const b = new Date(to + 'T00:00:00')
+  const d = (x, opts) => x.toLocaleDateString('en-IN', opts)
+  if (from === to) return d(a, { day: '2-digit', month: 'short', year: 'numeric' })
+  const sameYear = a.getFullYear() === b.getFullYear()
+  const sameMonth = sameYear && a.getMonth() === b.getMonth()
+  return `${d(a, sameMonth ? { day: '2-digit' } : { day: '2-digit', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) })}`
+    + ` – ${d(b, { day: '2-digit', month: 'short', year: 'numeric' })}`
 }
 
 const rangeParams = (range, custom) => {
@@ -316,7 +343,8 @@ function TaskDashboard({ onTileClick }) {
 
   return (
     <div>
-      <RangePicker range={range} setRange={setRange} custom={custom} setCustom={setCustom} />
+      <RangePicker range={range} setRange={setRange} custom={custom} setCustom={setCustom}
+        applied={data ? { from: data.range_from, to: data.range_to } : null} />
       <div className="filters">
         <div className="seg">
           <button className={'seg-btn' + (scope === 'my' ? ' on' : '')} onClick={() => setScope('my')}>My Report</button>
@@ -738,7 +766,9 @@ function TaskList({ scope, prefill, people = [], clearPrefill, preset, clearPres
 }
 
 /* Dropdown with checkboxes + name search — used for Assign to and Loop */
-function MultiSelect({ options, selected, onChange, placeholder }) {
+/* A searchable multi-picker. Shared with Groups, so people are chosen the
+   same way wherever the app asks for them. */
+export function MultiSelect({ options, selected, onChange, placeholder }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const picked = options.filter(o => selected.includes(o.id))

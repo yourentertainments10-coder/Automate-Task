@@ -267,3 +267,62 @@ class IdeaTests(Base):
         self.assertEqual(res.data, {"voted": True, "vote_count": 1})
         res = self.client.post(f"/api/ideas/{idea.id}/vote/")
         self.assertEqual(res.data, {"voted": False, "vote_count": 0})
+
+
+class GroupMemberPickingTests(Base):
+    """A group used to be created empty and filled one person at a time from
+    a dropdown with no search. Members can now be chosen on the form, and
+    several added at once afterwards."""
+
+    def test_members_can_be_chosen_while_creating_the_group(self):
+        self.as_(self.manager)
+        res = self.client.post("/api/groups/",
+                               {"name": "Bijwasan floor",
+                                "members": [self.rahul.id, self.amit.id]},
+                               format="json")
+        self.assertEqual(res.status_code, 201)
+        names = {m["id"] for m in res.data["members_detail"]}
+        # the creator is always in their own group
+        self.assertEqual(names, {self.rahul.id, self.amit.id, self.manager.id})
+
+    def test_several_people_can_be_added_in_one_call(self):
+        self.as_(self.manager)
+        gid = self.client.post("/api/groups/", {"name": "G"}, format="json").data["id"]
+        res = self.client.post(f"/api/groups/{gid}/add_member/",
+                               {"users": [self.rahul.id, self.amit.id]}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["member_count"], 3)
+
+    def test_adding_one_the_old_way_still_works(self):
+        self.as_(self.manager)
+        gid = self.client.post("/api/groups/", {"name": "G"}, format="json").data["id"]
+        res = self.client.post(f"/api/groups/{gid}/add_member/",
+                               {"user": self.rahul.id}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["member_count"], 2)
+
+    def test_an_unknown_id_is_refused_and_nobody_is_added(self):
+        self.as_(self.manager)
+        gid = self.client.post("/api/groups/", {"name": "G"}, format="json").data["id"]
+        res = self.client.post(f"/api/groups/{gid}/add_member/",
+                               {"users": [self.rahul.id, 99999]}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(self.client.get(f"/api/groups/{gid}/").data["member_count"], 1)
+
+    def test_an_empty_list_is_refused(self):
+        self.as_(self.manager)
+        gid = self.client.post("/api/groups/", {"name": "G"}, format="json").data["id"]
+        self.assertEqual(self.client.post(f"/api/groups/{gid}/add_member/",
+                                          {"users": []}, format="json").status_code, 400)
+
+    def test_only_the_owner_or_an_admin_may_add(self):
+        """An outsider gets 404 rather than 403 -- they cannot see the group at
+        all, so its existence is not leaked. Either way nobody is added."""
+        self.as_(self.manager)
+        gid = self.client.post("/api/groups/", {"name": "G"}, format="json").data["id"]
+        self.as_(self.rahul)
+        res = self.client.post(f"/api/groups/{gid}/add_member/",
+                               {"users": [self.amit.id]}, format="json")
+        self.assertIn(res.status_code, (403, 404))
+        self.as_(self.manager)
+        self.assertEqual(self.client.get(f"/api/groups/{gid}/").data["member_count"], 1)

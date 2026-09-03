@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, errorText } from '../api'
 import { useAuth } from '../auth'
+import { MultiSelect } from './Tasks'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -54,14 +55,20 @@ function GroupModal({ initial, onClose, onSaved }) {
   const [f, setF] = useState(initial
     ? { name: initial.name, description: initial.description, category: initial.category }
     : { name: '', description: '', category: '' })
+  // A group with nobody in it is not a group -- pick the team here rather
+  // than creating it empty and adding people one at a time afterwards.
+  const [members, setMembers] = useState(initial ? initial.members_detail.map(m => m.id) : [])
+  const [team, setTeam] = useState([])
   const [err, setErr] = useState('')
+  useEffect(() => { api('/api/leads/assignees/').then(setTeam).catch(() => {}) }, [])
   const set = k => e => setF(p => ({ ...p, [k]: e.target.value }))
   const submit = async (e) => {
     e.preventDefault()
     setErr('')
     try {
-      if (initial) await api(`/api/groups/${initial.id}/`, { method: 'PATCH', body: f })
-      else await api('/api/groups/', { method: 'POST', body: f })
+      const body = { ...f, members }
+      if (initial) await api(`/api/groups/${initial.id}/`, { method: 'PATCH', body })
+      else await api('/api/groups/', { method: 'POST', body })
       onSaved()
     } catch (ex) { setErr(errorText(ex.data) || ex.message) }
   }
@@ -73,6 +80,12 @@ function GroupModal({ initial, onClose, onSaved }) {
           <div className="wide"><label>Name *</label><input value={f.name} onChange={set('name')} autoFocus /></div>
           <div className="wide"><label>Description</label><input value={f.description} onChange={set('description')} /></div>
           <div><label>Category</label><input value={f.category} onChange={set('category')} placeholder="e.g. Sales, HR" /></div>
+          <div className="wide">
+            <label>Members</label>
+            <div className="hint">Search by name. You are added automatically as the owner.</div>
+            <MultiSelect options={team} selected={members} onChange={setMembers}
+              placeholder="— search and pick people —" />
+          </div>
         </div>
         {err && <div className="err">{err}</div>}
         <div className="modal-actions">
@@ -275,7 +288,8 @@ function GroupLinks({ group }) {
 
 function GroupMembers({ group, onChanged }) {
   const [team, setTeam] = useState([])
-  const [adding, setAdding] = useState('')
+  const [adding, setAdding] = useState([])
+  const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   // assignees = ALL active users -- a group owner can add any colleague,
   // not just the people who report to them (which is what /api/team/ returns now)
@@ -296,14 +310,23 @@ function GroupMembers({ group, onChanged }) {
     <div style={{ maxWidth: 560 }}>
       {err && <div className="err">{err}</div>}
       {group.can_manage && (
-        <div className="filters">
-          <select value={adding} onChange={e => {
-            const id = Number(e.target.value)
-            if (id) { change('add_member', id); setAdding('') }
-          }}>
-            <option value="">+ Add member…</option>
-            {available.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+        <div className="add-members">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <MultiSelect options={available} selected={adding} onChange={setAdding}
+              placeholder="— search and pick people to add —" />
+          </div>
+          <button className="btn btn-primary" disabled={!adding.length || busy}
+            onClick={async () => {
+              setErr(''); setBusy(true)
+              try {
+                await api(`/api/groups/${group.id}/add_member/`,
+                  { method: 'POST', body: { users: adding } })
+                setAdding([]); onChanged()
+              } catch (e) { setErr(errorText(e.data) || e.message) }
+              finally { setBusy(false) }
+            }}>
+            {busy ? 'Adding…' : `Add${adding.length ? ` ${adding.length}` : ''}`}
+          </button>
         </div>
       )}
       <table className="table">

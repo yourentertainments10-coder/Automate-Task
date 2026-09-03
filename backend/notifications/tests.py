@@ -2,6 +2,7 @@ import os
 from unittest import mock
 
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import Role, User
@@ -73,3 +74,68 @@ class NotificationApiTests(ChannelsDisabledMixin, TestCase):
         self.as_(self.b)
         other = Notification.objects.filter(user=self.a).first()
         self.assertEqual(self.client.post(f"/api/notifications/{other.id}/read/").status_code, 404)
+
+
+class ClearNotificationsTests(ChannelsDisabledMixin, TestCase):
+    """People asked to be able to empty their own list for good. The rows are
+    deleted from the database, and one person can never touch another's."""
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.emp = make("clear.emp", Role.SALES_EXECUTIVE, department="sales")
+        self.other = make("clear.other", Role.SALES_EXECUTIVE, department="sales")
+        for i in range(3):
+            n = Notification.objects.create(user=self.emp, type="test", title=f"read {i}")
+            Notification.objects.filter(pk=n.pk).update(read_at=timezone.now())
+        for i in range(2):
+            Notification.objects.create(user=self.emp, type="test", title=f"unread {i}")
+        Notification.objects.create(user=self.other, type="test", title="not yours")
+
+    def as_(self, user):
+        res = self.client.post("/api/auth/login",
+                               {"username": user.username, "password": "pass@12345"})
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {res.data['access']}")
+
+    def test_clear_read_leaves_the_unread_ones(self):
+        self.as_(self.emp)
+        res = self.client.post("/api/notifications/clear/?only=read")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["deleted"], 3)
+        left = Notification.objects.filter(user=self.emp)
+        self.assertEqual(left.count(), 2)
+        self.assertTrue(all(n.read_at is None for n in left))
+
+    def test_clear_all_empties_the_list(self):
+        self.as_(self.emp)
+        res = self.client.post("/api/notifications/clear/")
+        self.assertEqual(res.data["deleted"], 5)
+        self.assertEqual(Notification.objects.filter(user=self.emp).count(), 0)
+
+    def test_clearing_never_touches_somebody_elses(self):
+        self.as_(self.emp)
+        self.client.post("/api/notifications/clear/")
+        self.assertEqual(Notification.objects.filter(user=self.other).count(), 1)
+
+    def test_rows_are_really_gone_not_hidden(self):
+        self.as_(self.emp)
+        self.client.post("/api/notifications/clear/")
+        # no soft-delete flag anywhere -- the query is unfiltered on purpose
+        self.assertFalse(Notification.objects.filter(user=self.emp).exists())
+
+    def test_one_notification_can_be_deleted_on_its_own(self):
+        self.as_(self.emp)
+        n = Notification.objects.filter(user=self.emp).first()
+        self.assertEqual(self.client.delete(f"/api/notifications/{n.id}/").status_code, 204)
+        self.assertFalse(Notification.objects.filter(pk=n.pk).exists())
+
+    def test_you_cannot_delete_somebody_elses(self):
+        self.as_(self.emp)
+        theirs = Notification.objects.get(user=self.other)
+        self.assertEqual(self.client.delete(f"/api/notifications/{theirs.id}/").status_code, 404)
+        self.assertTrue(Notification.objects.filter(pk=theirs.pk).exists())
+
+    def test_an_employee_may_clear_their_own_list(self):
+        """Everyone gets this, not just admins -- everyone's list fills up."""
+        self.as_(self.emp)
+        self.assertEqual(self.client.post("/api/notifications/clear/").status_code, 200)

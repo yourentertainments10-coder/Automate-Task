@@ -369,6 +369,35 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .tab-menu button:hover { background: var(--bg); }
 .tab-menu button.on { color: var(--accent); font-weight: 700; }
 
+/* The exact dates the numbers cover, so nobody has to guess where a week
+   ends or whether it crossed into the next month. */
+/* A button that destroys something. Deliberately not the accent colour --
+   nothing here should look like the safe primary action. */
+.btn-danger { border-color: var(--red); color: var(--red); background: var(--surface); }
+.btn-danger:hover:not(:disabled) { background: var(--red-soft); }
+
+/* Removing one notification -- quiet until the row is hovered, and always
+   there on a phone, where hover does not exist. */
+.notif-del { flex: none; align-self: flex-start; min-width: 36px; min-height: 36px; }
+@media (hover: hover) and (min-width: 768px) {
+  .notif-del { opacity: 0; transition: opacity .12s; }
+  .notif:hover .notif-del, .notif-del:focus-visible { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .notif-del { transition: none; } }
+
+.add-members {
+  display: flex; gap: 8px; align-items: flex-start; margin-bottom: 12px;
+}
+@media (max-width: 820px) {
+  .add-members { flex-direction: column; }
+  .add-members > div, .add-members .btn { width: 100%; }
+}
+
+.range-applied {
+  font-size: 13px; color: var(--muted); font-weight: 600;
+  align-self: center; white-space: nowrap;
+}
+
 /* One dropdown in place of nine date pills. */
 .range-select {
   border: 1px solid var(--line); border-radius: 999px; background: var(--surface);

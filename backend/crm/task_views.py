@@ -1399,7 +1399,16 @@ class TaskViewSet(viewsets.ModelViewSet):
             {"category": cat, "total": len(sub), **tally(sub)}
             for cat, sub in sorted(by_category.items(), key=lambda kv: kv[0].lower())
         ]
-        return Response({"tiles": {**tally(rows), "total": len(rows)}, "categories": categories})
+        # Say which dates were actually counted. "This week" often straddles
+        # two months (a Monday in August, a Thursday in September), so a task
+        # can sit in This Week and not in This Month -- correct, and baffling
+        # until you can see the dates.
+        return Response({
+            "tiles": {**tally(rows), "total": len(rows)},
+            "categories": categories,
+            "range_from": start.isoformat() if start else None,
+            "range_to": end.isoformat() if end else None,
+        })
 
 
 class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
