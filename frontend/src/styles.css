@@ -146,6 +146,10 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 /* ---------- Leads: stats + filters ---------- */
 .leads-page { display: flex; flex-direction: column; min-height: 100%; }
 .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+/* Names the group of tiles underneath, so Tasks and Leads read as two
+   sections rather than eleven loose numbers. */
+.dash-band { font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--muted); margin: 4px 0 7px; }
 .stat {
   flex: 1; min-width: 140px; background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 10px 14px; box-shadow: var(--shadow);
@@ -346,15 +350,49 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 
 /* ---------- Tasks ---------- */
 .area-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; flex-wrap: wrap; }
+
+/* The overflow tabs. Anchored to the "More" button so the menu opens under
+   it on a laptop and still fits inside a 375px screen. */
+.tab-more { position: relative; }
+.tab-more-veil { position: fixed; inset: 0; z-index: 39; }
+.tab-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(20,32,28,.14); padding: 5px;
+  display: flex; flex-direction: column; min-width: 190px; max-width: 78vw;
+}
+.tab-menu button {
+  background: none; border: 0; text-align: left; cursor: pointer;
+  font: inherit; font-size: 14px; padding: 10px 12px; border-radius: 7px;
+  min-height: 44px; color: var(--ink); white-space: nowrap;
+}
+.tab-menu button:hover { background: var(--bg); }
+.tab-menu button.on { color: var(--accent); font-weight: 700; }
+
+/* One dropdown in place of nine date pills. */
+.range-select {
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+  padding: 8px 12px; font-size: 13.5px; font-weight: 600; min-height: 40px;
+  color: var(--ink);
+}
+@media (max-width: 820px) {
+  .range-select { min-height: 44px; font-size: 14px; }
+  .tab { min-height: 44px; font-size: 14px; }
+  /* the segment toggles were the last controls under the thumb minimum */
+  .seg-btn { min-height: 44px; font-size: 14px; padding: 7px 16px; }
+  .chip { min-height: 44px; font-size: 14px; }
+}
 .chip.on-accent { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .bell { border: none; background: none; font-size: 15px; opacity: .35; cursor: pointer; padding: 2px; }
 .bell.on { opacity: 1; }
 .tpl-cat { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
 .stat.good .value { color: var(--accent); }
 .t-code {
-  font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; font-weight: 500;
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 500;
   background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
   padding: 1px 6px; color: var(--muted); margin-right: 2px;
+  /* T-00062 split over two lines stops being a reference number */
+  white-space: nowrap; flex: none;
 }
 .ai-chip.est { background: #eef0fb; color: #4557b0; }
 
@@ -445,6 +483,14 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
   .stats { gap: 10px; }
   .stat { min-width: 0; flex: 1 1 calc(50% - 5px); }
 
+  /* Nothing on a phone drops below 13px -- this is where the due date, the
+     assigner and the overdue line live, read outdoors on a cheap screen. */
+  .small, .muted, .step-note, .tpl-cat, .ai-chip, .seg-btn,
+  .stat .label, .task-row select { font-size: 13px; }
+  .t-code, .prio, .pill { font-size: 12.5px; }
+  /* the two facts people open the app for */
+  .when, .late { font-size: 14px; }
+
   h1 { font-size: 21px; }
   .page-head { flex-wrap: wrap; gap: 10px; }
 
@@ -495,7 +541,7 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
   .col { min-width: 78vw; width: 78vw; }
   .board { gap: 10px; }
 
-  .area-tabs { overflow-x: auto; white-space: nowrap; flex-wrap: nowrap; }
+  .area-tabs { flex-wrap: wrap; overflow: visible; }
   .area-tabs .tab { flex-shrink: 0; }
   .task-row { flex-wrap: wrap; }
   /* Chips share the title's flex row; without wrapping they squeeze a long
@@ -507,7 +553,9 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 }
 
 @media (max-width: 420px) {
-  .stat { flex: 1 1 100%; }
+  /* Six full-width tiles meant scrolling ~1000px to read the sixth number.
+     Two per row halves that and still fits the label at 375px. */
+  .stat { flex: 1 1 calc(50% - 5px); min-width: 0; }
   .stats.compact .stat { flex: 1 1 calc(50% - 5px); }
   .col { min-width: 86vw; width: 86vw; }
 }
@@ -594,7 +642,9 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .seg-btn { border: none; background: none; padding: 7px 14px; font-weight: 600; font-size: 13px; color: var(--muted); }
 .seg-btn.on { background: var(--accent); color: #fff; }
-.task-list { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+/* Wide enough to use the screen people actually have; the phone rules
+   below take over long before this matters. */
+.task-list { display: flex; flex-direction: column; gap: 8px; max-width: 1000px; }
 .task-row {
   display: flex; gap: 12px; align-items: flex-start;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
@@ -763,6 +813,76 @@ code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 
 /* One checklist row on the task detail panel */
 .step-row { display: flex; gap: 9px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--line); }
+/* Ticking a step is the most repeated action in the app. The label is the
+   target, not the 13px box inside it: full width, 48px tall, tick anywhere. */
+.step-hit {
+  display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0;
+  min-height: 48px; padding: 5px 6px; margin: -5px -6px; border-radius: 9px;
+  background: none; border: 0; font: inherit; color: inherit; text-align: left;
+  cursor: pointer;
+}
+.step-hit:hover:not(:disabled) { background: var(--bg); }
+.step-hit:disabled { cursor: default; }
+/* clear of the tick area, and it asks before removing */
+.step-del { margin-left: 10px; flex: none; min-width: 40px; min-height: 40px; }
+
+/* The file button: full width on a phone so it is unmissable, sized like the
+   rest of the form rather than like browser chrome. */
+.file-btn { width: 100%; justify-content: center; min-height: 44px; font-weight: 600; }
+@media (min-width: 821px) { .file-btn { width: auto; } }
+
+/* An action on a task card. A phone has no hover, so the word rides on the
+   button; a laptop keeps the compact icon and shows the label on hover. */
+.icon-act {
+  position: relative; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 40px; flex: none;
+}
+.icon-act-word { font-size: 13px; font-weight: 600; }
+@media (hover: hover) and (min-width: 768px) {
+  .icon-act { min-height: 32px; }
+  .icon-act-word { display: none; }
+  .icon-act::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 7px); right: 0;
+    background: var(--ink); color: var(--surface);
+    font: 600 11.5px/1 inherit; padding: 6px 9px; border-radius: 6px;
+    white-space: nowrap; opacity: 0; visibility: hidden; transition: opacity .12s;
+    pointer-events: none; z-index: 40;
+  }
+  .icon-act:hover::after, .icon-act:focus-visible::after { opacity: 1; visibility: visible; }
+}
+@media (prefers-reduced-motion: reduce) { .icon-act::after { transition: none; } }
+
+/* Grey explanation under a short label, so no label wraps to two lines and
+   knocks the grid crooked. */
+.hint { font-size: 12.5px; line-height: 1.35; color: var(--muted); margin: -2px 0 5px; }
+@media (max-width: 820px) { .hint { font-size: 13px; } }
+
+/* An optional block, shut until wanted. Native <details>, so it works with a
+   keyboard and needs no JS. */
+.opt-box {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg); padding: 0 14px; margin-top: 12px;
+}
+.opt-box > summary {
+  cursor: pointer; list-style: none; padding: 13px 0; min-height: 48px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-weight: 700; font-size: 14.5px;
+}
+.opt-box > summary::-webkit-details-marker { display: none; }
+.opt-box > summary::before {
+  content: "+"; font-family: 'IBM Plex Mono', monospace; font-weight: 600;
+  color: var(--accent); width: 16px; flex: none;
+}
+.opt-box[open] > summary::before { content: "2"; }
+.opt-box[open] > summary { border-bottom: 1px solid var(--line); }
+.opt-box > summary > .muted { font-weight: 400; }
+.opt-box > *:not(summary) { margin-bottom: 12px; }
+.opt-box > *:first-of-type { margin-top: 12px; }
+.step-hit input[type="checkbox"] {
+  width: 22px; height: 22px; margin: 1px 0 0; flex: none;
+  accent-color: var(--accent); pointer-events: none;
+}
 .step-row:last-child { border-bottom: none; }
 .step-row.done .step-label { text-decoration: line-through; color: var(--muted); }
 .step-note { font-size: 12.5px; color: var(--muted); margin-top: 2px; }

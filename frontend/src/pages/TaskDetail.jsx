@@ -6,6 +6,7 @@ import { api, apiUpload, errorText } from '../api'
 import { CompleteModal, ProgressModal, RequestChangeModal } from './TaskExtras'
 import { fmtEffort, relDue } from './Tasks'
 import ProofreadText from '../ProofreadText'
+import FilePick from '../FilePick'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -117,22 +118,32 @@ export default function TaskDetailPanel({ taskId, user, team, settings,
             )}
             {t.checklist.map(c => (
               <div key={c.id} className={'step-row' + (c.done ? ' done' : '')}>
-                <input type="checkbox" checked={c.done} style={{ marginTop: 3 }}
+                {/* the row is the target, not the box inside it -- 48px tall,
+                    tick anywhere on the text */}
+                <button type="button" className="step-hit"
                   title={c.done ? 'Re-open this step' : 'Tick and say what you did'}
-                  onChange={() => (c.done ? post(`check/${c.id}/`, {}) : setTicking(c))} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="small step-label">{c.text}</div>
-                  {c.done && c.note && (
-                    <div className="step-note">
-                      ✓ {c.note}
-                      {c.done_by_name && <> — {c.done_by_name}</>}
-                      {c.done_at && <>, {fmtDT(c.done_at)}</>}
-                    </div>
-                  )}
-                </div>
+                  onClick={() => (c.done ? post(`check/${c.id}/`, {}) : setTicking(c))}>
+                  <input type="checkbox" checked={c.done} readOnly tabIndex={-1} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span className="small step-label">{c.text}</span>
+                    {c.done && c.note && (
+                      <span className="step-note" style={{ display: 'block' }}>
+                        ✓ {c.note}
+                        {c.done_by_name && <> — {c.done_by_name}</>}
+                        {c.done_at && <>, {fmtDT(c.done_at)}</>}
+                      </span>
+                    )}
+                  </span>
+                </button>
                 {!c.done && (
-                  <button className="btn btn-sm" title="Remove this step"
-                    onClick={() => post(`check/${c.id}/?delete=true`, {})}>✕</button>
+                  /* Deleting used to be the bigger, easier target of the two.
+                     It now confirms, and sits clear of the tick area. */
+                  <button className="btn btn-sm step-del" title="Remove this step"
+                    onClick={() => {
+                      if (confirm(`Remove this step?\n\n"${c.text}"`)) {
+                        post(`check/${c.id}/?delete=true`, {})
+                      }
+                    }}>✕</button>
                 )}
               </div>
             ))}
@@ -195,19 +206,17 @@ export default function TaskDetailPanel({ taskId, user, team, settings,
             ))}
             {files.length === 0 && <p className="muted small">No files yet.</p>}
             <div style={{ marginTop: 6 }}>
-              <input type="file" multiple disabled={uploading}
-                onChange={async e => {
-                  const picked = [...e.target.files].slice(0, 5)
-                  if (!picked.length) return
-                  setErr(''); setUploading(true)
-                  try {
-                    const fd = new FormData()
-                    picked.forEach(f => fd.append('file', f))
-                    await apiUpload(`/api/tasks/${taskId}/upload/`, fd)
-                    load(); onChanged?.()
-                  } catch (ex) { setErr(errorText(ex.data) || ex.message) }
-                  finally { setUploading(false); e.target.value = '' }
-                }} />
+              <FilePick busy={uploading} onPick={async all => {
+                const picked = all.slice(0, 5)
+                setErr(''); setUploading(true)
+                try {
+                  const fd = new FormData()
+                  picked.forEach(f => fd.append('file', f))
+                  await apiUpload(`/api/tasks/${taskId}/upload/`, fd)
+                  load(); onChanged?.()
+                } catch (ex) { setErr(errorText(ex.data) || ex.message) }
+                finally { setUploading(false) }
+              }} />
               <div className="muted small">
                 {uploading ? 'Uploading…' : 'Up to 5 files, 10 MB each.'}
               </div>

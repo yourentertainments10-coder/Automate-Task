@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import {
   BarElement, CategoryScale, Chart as ChartJS, LinearScale, Tooltip,
 } from 'chart.js'
@@ -12,6 +12,7 @@ import PersonProfile from './PersonProfile'
 import TaskDetailPanel from './TaskDetail'
 import { ChangeRequests, CompleteModal, DeletedTasks, ProgressModal, RequestChangeModal, WorkloadPanel } from './TaskExtras'
 import { useDepartments } from '../useDepartments'
+import FilePick from '../FilePick'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
@@ -59,7 +60,12 @@ export default function Tasks() {
   useEffect(() => { if (deepLinked) setOpenTask(Number(deepLinked)) }, [deepLinked])
   const isAdmin = can('tasks.view_all')
   const isManager = isAdmin || can('tasks.view_department')
-  const [area, setArea] = useState('dashboard')
+  // The tab is in the address, so refreshing, pressing Back, or opening a
+  // link from WhatsApp all land on the tab you were actually looking at.
+  const [params, setParams] = useSearchParams()
+  const area = params.get('tab') || 'dashboard'
+  const setArea = useCallback(v => setParams(
+    v === 'dashboard' ? {} : { tab: v }, { replace: false }), [setParams])
   const [prefill, setPrefill] = useState(null)   // template -> open list with modal
   const [listPreset, setListPreset] = useState(null)  // D3: tile click-through filters
   const [inboxCount, setInboxCount] = useState(0)
@@ -97,11 +103,7 @@ export default function Tasks() {
   return (
     <div>
       <div className="page-head"><h1>Tasks</h1></div>
-      <div className="area-tabs">
-        {tabs.map(([v, l]) => (
-          <button key={v} className={'tab' + (area === v ? ' on' : '')} onClick={() => setArea(v)}>{l}</button>
-        ))}
-      </div>
+      <TabBar tabs={tabs} area={area} setArea={setArea} />
       {area === 'dashboard' && (
         <TaskDashboard onTileClick={(preset) => { setListPreset(preset); setArea(preset.area) }} />
       )}
@@ -141,20 +143,71 @@ function TaskDeepLink({ taskId, onClose }) {
 /* ================= Dashboard ================= */
 
 const TILES = [
-  ['overdue', 'Overdue', 'alert'], ['pending', 'Pending', ''],
-  ['in_progress', 'In Progress', ''], ['completed', 'Completed', 'good'],
-  ['in_time', 'In Time', 'good'], ['delayed', 'Delayed', 'alert'],
+  // last item is the denominator the share is taken against
+  ['overdue', 'Overdue', 'alert', 'total'], ['pending', 'Pending', '', 'total'],
+  ['in_progress', 'In Progress', '', 'total'], ['completed', 'Completed', 'good', 'total'],
+  ['in_time', 'Finished on time', 'good', 'completed'],
+  ['delayed', 'Finished late', 'alert', 'completed'],
 ]
+
+/* Twelve tabs in a row scrolled off a phone and pushed every number below
+   the fold. The four people actually use stay put; the rest live behind
+   "More", which still shows which tab is active when one is chosen. */
+function TabBar({ tabs, area, setArea }) {
+  const [open, setOpen] = useState(false)
+  const PRIMARY = 4
+  const front = tabs.slice(0, PRIMARY)
+  const rest = tabs.slice(PRIMARY)
+  const restActive = rest.find(([v]) => v === area)
+  useEffect(() => { setOpen(false) }, [area])
+  if (!rest.length) {
+    return (
+      <div className="area-tabs">
+        {front.map(([v, l]) => (
+          <button key={v} className={'tab' + (area === v ? ' on' : '')}
+            onClick={() => setArea(v)}>{l}</button>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div className="area-tabs">
+      {front.map(([v, l]) => (
+        <button key={v} className={'tab' + (area === v ? ' on' : '')}
+          onClick={() => setArea(v)}>{l}</button>
+      ))}
+      <div className="tab-more">
+        <button className={'tab' + (restActive ? ' on' : '')} aria-expanded={open}
+          onClick={() => setOpen(o => !o)}>
+          {restActive ? restActive[1] : 'More'} ▾
+        </button>
+        {open && (
+          <>
+            <div className="tab-more-veil" onClick={() => setOpen(false)} />
+            <div className="tab-menu" role="menu">
+              {rest.map(([v, l]) => (
+                <button key={v} role="menuitem" className={area === v ? 'on' : ''}
+                  onClick={() => setArea(v)}>{l}</button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /* D3: preset chips + a custom from–to picker, shared by dashboard & reports */
 function RangePicker({ range, setRange, custom, setCustom }) {
   return (
     <div className="filters">
-      {RANGES.map(([v, l]) => (
-        <button key={v} className={'chip' + (range === v ? ' on-accent' : '')} onClick={() => setRange(v)}>{l}</button>
-      ))}
-      <button className={'chip' + (range === 'custom' ? ' on-accent' : '')}
-        onClick={() => setRange('custom')}>Custom</button>
+      {/* Nine pills wrapped over three rows on a phone. One dropdown says the
+          same thing in one line and reads the same on both screens. */}
+      <select className="range-select" value={range} onChange={e => setRange(e.target.value)}
+        aria-label="Date range">
+        {RANGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        <option value="custom">Custom range…</option>
+      </select>
       {range === 'custom' && (
         <>
           <input type="date" value={custom.start} onChange={e => setCustom(c => ({ ...c, start: e.target.value }))} />
@@ -284,8 +337,9 @@ function TaskDashboard({ onTileClick }) {
       {data && (
         <>
           <div className="stats">
-            {TILES.map(([k, l, tone]) => {
-              const pct = data.tiles.total ? Math.round(100 * data.tiles[k] / data.tiles.total) : 0
+            {TILES.map(([k, l, tone, base]) => {
+              const of = data.tiles[base] || 0
+              const share = of ? `${data.tiles[k]} of ${of} ${base === 'completed' ? 'completed' : 'tasks'}` : '—'
               return (
                 <div key={k}
                   className={'stat' + (tone === 'alert' && data.tiles[k] > 0 ? ' alert' : '')}
@@ -296,7 +350,7 @@ function TaskDashboard({ onTileClick }) {
                   })}>
                   <div className="label">{l}</div>
                   <div className="value">{data.tiles[k]}</div>
-                  <div className="small muted">{pct}%</div>
+                  <div className="small muted">{share}</div>
                 </div>
               )
             })}
@@ -611,17 +665,27 @@ function TaskList({ scope, prefill, people = [], clearPrefill, preset, clearPres
             )}
             {(t.assigned_to === user.id || t.created_by_detail?.id === user.id
               || user.capabilities?.includes('tasks.view_all')) && t.status !== 'done' && (
-              <button className="btn btn-sm"
+              <button className="btn btn-sm icon-act"
+                data-tip={user.capabilities?.includes('tasks.view_all')
+                  ? 'Edit this task' : 'Ask to change this task'}
                 title={user.capabilities?.includes('tasks.view_all')
                   ? 'Edit this task (admin — applies immediately)'
                   : 'Propose a change (deadline, effort, recurrence…) for approval'}
-                onClick={() => setRequestFor(t)}>✎</button>
+                onClick={() => setRequestFor(t)}>
+                <span aria-hidden="true">✎</span>
+                <span className="icon-act-word">
+                  {user.capabilities?.includes('tasks.view_all') ? 'Edit' : 'Change'}
+                </span>
+              </button>
             )}
             <button
-              className={'bell' + (t.subscribed ? ' on' : '')}
+              className={'bell btn btn-sm icon-act' + (t.subscribed ? ' on' : '')}
+              data-tip={t.subscribed ? 'Unfollow' : 'Follow this task'}
               title={t.subscribed ? 'Unfollow' : 'Follow this task'}
-              onClick={() => toggleSub(t)}
-            >🔔</button>
+              onClick={() => toggleSub(t)}>
+              <span aria-hidden="true">🔔</span>
+              <span className="icon-act-word">{t.subscribed ? 'Following' : 'Follow'}</span>
+            </button>
             {t.status === 'in_progress' && t.assigned_to === user.id && (
               <button className="btn btn-sm" title="Add another status update (% done, effort, comment)"
                 onClick={() => setProgressFor(t)}>+ update</button>
@@ -891,73 +955,6 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
               onClick={aiDraft}>{aiBusy ? '…' : 'Generate'}</button>
           </div>
         )}
-        <div className="steps-box">
-          <div className="steps-head">
-            <strong>Steps to finish this task</strong>
-            <span className="muted small">
-              {steps.length ? `${steps.length} step${steps.length === 1 ? '' : 's'}`
-                : 'optional — but a big task is easier one step at a time'}
-            </span>
-          </div>
-          {steps.length > 0 && (
-            <ol className="steps-list">
-              {steps.map((s, i) => (
-                <li key={i}>
-                  <span className="steps-text">{s}</span>
-                  <span className="steps-actions">
-                    <button type="button" className="btn btn-sm" title="Move up"
-                      onClick={() => moveStep(i, -1)} disabled={i === 0}>↑</button>
-                    <button type="button" className="btn btn-sm" title="Move down"
-                      onClick={() => moveStep(i, 1)}
-                      disabled={i === steps.length - 1}>↓</button>
-                    <button type="button" className="btn btn-sm" title="Remove"
-                      onClick={() => setSteps(prev => prev.filter((_, k) => k !== i))}>✕</button>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
-          <div className="steps-add">
-            <input value={stepDraft} onChange={e => setStepDraft(e.target.value)}
-              placeholder="e.g. Collect the invoice copy from accounts"
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addStep() } }} />
-            <button type="button" className="btn btn-sm btn-primary"
-              disabled={!stepDraft.trim()} onClick={addStep}>+ Add step</button>
-          </div>
-          {steps.length > 0 && (
-            <p className="muted small" style={{ margin: '6px 0 0' }}>
-              The assignee ticks each step with a note on what they did, and can only
-              mark the task complete once every step is done.
-            </p>
-          )}
-        </div>
-
-        <div className="steps-box">
-          <div className="steps-head">
-            <strong>Attachments</strong>
-            <span className="muted small">optional — invoice, photo, anything they need</span>
-          </div>
-          <input type="file" multiple
-            onChange={e => setAttachments([...e.target.files].slice(0, 5))} />
-          {attachments.length > 0 && (
-            <ul className="steps-list">
-              {attachments.map((f, i) => (
-                <li key={i}>
-                  <span className="steps-text">📎 {f.name}
-                    <span className="muted small"> · {Math.round(f.size / 1024)} KB</span>
-                  </span>
-                  <span className="steps-actions">
-                    <button type="button" className="btn btn-sm" title="Remove"
-                      onClick={() => setAttachments(p => p.filter((_, k) => k !== i))}>✕</button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="muted small" style={{ margin: '6px 0 0' }}>
-            Up to 5 files, 10 MB each. Everyone on the task can open them.
-          </p>
-        </div>
         <div className="form-grid">
           <div className="wide">
             <label>Title *</label>
@@ -969,11 +966,36 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
               placeholder="What exactly has to be done?&#10;Press Enter for a new line — write as many points as you need." />
           </div>
           <div>
-            <label>Department</label>
-            <select value={f.department} onChange={set('department')}>
-              <option value="">General (no department)</option>
-              {DEPARTMENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            <label>Assign to *</label>
+            <div className="hint">Your level and below. Each person gets their own copy.</div>
+            <MultiSelect options={team} selected={assignees} onChange={setAssignees}
+              placeholder="— pick people —" />
+            {assignees.length === 0 && (
+              <button type="button" className="btn btn-sm" style={{ marginTop: 4 }}
+                onClick={() => setAssignees([user.id])}>Assign to myself</button>
+            )}
+          </div>
+          <div>
+            <label>Due * {f.frequency !== 'one_time' && '(first occurrence)'}</label>
+            <input type="datetime-local" value={f.due_at} onChange={set('due_at')}
+              min={nowForInput()} required />
+            {f.due_at && new Date(f.due_at) <= new Date() && (
+              <div className="err" style={{ margin: '4px 0 0' }}>
+                That time has already passed — check AM/PM.
+              </div>
+            )}
+          </div>
+          <div>
+            <label>Effort *</label>
+            <div className="hint">How long should this take?</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input type="number" min="1" value={f.effort} onChange={set('effort')}
+                required placeholder="required" style={{ flex: 1 }} />
+              <select value={f.effort_unit} onChange={set('effort_unit')} style={{ width: 90 }}>
+                <option value="minutes">min</option>
+                <option value="hours">hours</option>
+              </select>
+            </div>
           </div>
           <div>
             <label>Category *</label>
@@ -1015,41 +1037,36 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
               </div>
             )}
           </div>
-          <div>
-            <label>Frequency</label>
-            <select value={f.frequency} onChange={set('frequency')}>
-              {FREQUENCIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Assign to * (your level &amp; below — each gets their own task)</label>
-            <MultiSelect options={team} selected={assignees} onChange={setAssignees}
-              placeholder="— pick people —" />
-            {assignees.length === 0 && (
-              <button type="button" className="btn btn-sm" style={{ marginTop: 4 }}
-                onClick={() => setAssignees([user.id])}>Assign to myself</button>
-            )}
-          </div>
           {workloads.length > 0 && (
             <div className="wide">
               {workloads.map(w => <WorkloadPanel key={w.user} w={w} />)}
             </div>
           )}
           <div>
-            <label>Effort — how long should this take? *</label>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input type="number" min="1" value={f.effort} onChange={set('effort')}
-                required placeholder="required" style={{ flex: 1 }} />
-              <select value={f.effort_unit} onChange={set('effort_unit')} style={{ width: 90 }}>
-                <option value="minutes">min</option>
-                <option value="hours">hours</option>
-              </select>
-            </div>
+            <label>Department</label>
+            <select value={f.department} onChange={set('department')}>
+              <option value="">General (no department)</option>
+              {DEPARTMENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
           </div>
           <div>
-            <label>Loop (colleagues who follow this task)</label>
-            <MultiSelect options={team.filter(a => a.id !== user.id)}
-              selected={inLoop} onChange={setInLoop} placeholder="— optional —" />
+            <label>Frequency</label>
+            <select value={f.frequency} onChange={set('frequency')}>
+              {FREQUENCIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          {f.frequency !== 'one_time' && (
+            <div>
+              <label>Repeat until</label>
+              <div className="hint">Optional — leave blank to repeat forever.</div>
+              <input type="date" value={f.repeat_until} onChange={set('repeat_until')} />
+            </div>
+          )}
+          <div>
+            <label>Priority</label>
+            <select value={f.priority} onChange={set('priority')}>
+              {PRIORITIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
           </div>
           <div>
             <label>Group</label>
@@ -1059,28 +1076,83 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
             </select>
           </div>
           <div>
-            <label>Priority</label>
-            <select value={f.priority} onChange={set('priority')}>
-              {PRIORITIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            <label>Loop</label>
+            <div className="hint">Colleagues who follow this task, but are not doing it.</div>
+            <MultiSelect options={team.filter(a => a.id !== user.id)}
+              selected={inLoop} onChange={setInLoop} placeholder="— optional —" />
           </div>
-          <div>
-            <label>Due * {f.frequency !== 'one_time' && '(first occurrence)'}</label>
-            <input type="datetime-local" value={f.due_at} onChange={set('due_at')}
-              min={nowForInput()} required />
-            {f.due_at && new Date(f.due_at) <= new Date() && (
-              <div className="err" style={{ margin: '4px 0 0' }}>
-                That time has already passed — check AM/PM.
-              </div>
-            )}
-          </div>
-          {f.frequency !== 'one_time' && (
-            <div>
-              <label>Repeat until (optional)</label>
-              <input type="date" value={f.repeat_until} onChange={set('repeat_until')} />
-            </div>
-          )}
         </div>
+        {/* Optional, so they sit below the required fields and stay
+            shut until wanted -- they used to fill the first phone screen. */}
+        <details className="opt-box">
+          <summary>Steps to finish this task
+            <span className="muted small">
+              {steps.length ? `${steps.length} step${steps.length === 1 ? '' : 's'} added`
+                : 'optional — a big task is easier one step at a time'}
+            </span>
+          </summary>
+            {steps.length > 0 && (
+              <ol className="steps-list">
+                {steps.map((s, i) => (
+                  <li key={i}>
+                    <span className="steps-text">{s}</span>
+                    <span className="steps-actions">
+                      <button type="button" className="btn btn-sm" title="Move up"
+                        onClick={() => moveStep(i, -1)} disabled={i === 0}>↑</button>
+                      <button type="button" className="btn btn-sm" title="Move down"
+                        onClick={() => moveStep(i, 1)}
+                        disabled={i === steps.length - 1}>↓</button>
+                      <button type="button" className="btn btn-sm" title="Remove"
+                        onClick={() => setSteps(prev => prev.filter((_, k) => k !== i))}>✕</button>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+            <div className="steps-add">
+              <input value={stepDraft} onChange={e => setStepDraft(e.target.value)}
+                placeholder="e.g. Collect the invoice copy from accounts"
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addStep() } }} />
+              <button type="button" className="btn btn-sm btn-primary"
+                disabled={!stepDraft.trim()} onClick={addStep}>+ Add step</button>
+            </div>
+            {steps.length > 0 && (
+              <p className="muted small" style={{ margin: '6px 0 0' }}>
+                The assignee ticks each step with a note on what they did, and can only
+                mark the task complete once every step is done.
+              </p>
+            )}
+        </details>
+        <details className="opt-box">
+          <summary>Attachments
+            <span className="muted small">
+              {attachments.length ? `${attachments.length} file${attachments.length === 1 ? '' : 's'} attached`
+                : 'optional — invoice, photo, anything they need'}
+            </span>
+          </summary>
+            <FilePick onPick={picked =>
+              setAttachments(prev => [...prev, ...picked]
+                .filter((f, i, all) => all.findIndex(x => x.name === f.name && x.size === f.size) === i)
+                .slice(0, 5))} />
+            {attachments.length > 0 && (
+              <ul className="steps-list">
+                {attachments.map((f, i) => (
+                  <li key={i}>
+                    <span className="steps-text">📎 {f.name}
+                      <span className="muted small"> · {Math.round(f.size / 1024)} KB</span>
+                    </span>
+                    <span className="steps-actions">
+                      <button type="button" className="btn btn-sm" title="Remove"
+                        onClick={() => setAttachments(p => p.filter((_, k) => k !== i))}>✕</button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="muted small" style={{ margin: '6px 0 0' }}>
+              Up to 5 files, 10 MB each. Everyone on the task can open them.
+            </p>
+        </details>
         {err && <div className="err">{err}</div>}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>

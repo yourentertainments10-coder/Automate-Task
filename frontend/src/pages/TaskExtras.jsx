@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, apiUpload, errorText } from '../api'
 import { fmtEffort, nowForInput } from './Tasks'
 import ProofreadText from '../ProofreadText'
+import FilePick from '../FilePick'
 
 const fmtDT = (iso) => iso
   ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -94,8 +95,8 @@ export function CompleteModal({ task, settings, onClose, onDone }) {
           </div>
           <div className="wide">
             <label>Proof files / photos {settings.require_completion_attachment ? '*' : '(optional)'}</label>
-            <input type="file" multiple
-              onChange={e => setFiles(prev => [...prev, ...e.target.files]
+            <FilePick onPick={picked =>
+              setFiles(prev => [...prev, ...picked]
                 .filter((f, i, all) => all.findIndex(x => x.name === f.name && x.size === f.size) === i)
                 .slice(0, 5))} />
             {files.length > 0 && (

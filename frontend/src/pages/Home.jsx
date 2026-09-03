@@ -125,6 +125,15 @@ function Dashboard({ user, showLeads }) {
     <div>
       {head}
 
+      <h3 className="dash-band">Tasks</h3>
+      <div className="stats">
+        <Tile label="Assigned Tasks" value={tiles.open_tasks} />
+        <Tile label="Overdue Tasks" value={tiles.overdue_tasks} alert={tiles.overdue_tasks > 0} />
+        <Tile label="Pending Follow-ups" value={tiles.pending_followups} />
+        <Tile label="Overdue Follow-ups" value={tiles.overdue} alert={tiles.overdue > 0} />
+      </div>
+
+      <h3 className="dash-band">Leads</h3>
       <div className="stats">
         <Tile label="Total Leads" value={tiles.total} />
         <Tile label="New" value={tiles.new} />
@@ -135,10 +144,6 @@ function Dashboard({ user, showLeads }) {
       <div className="stats">
         <Tile label="Pipeline Value" value={fmtINR(tiles.pipeline_value) || '₹0'} />
         <Tile label="Conversion" value={tiles.conversion_pct + '%'} />
-        <Tile label="Pending Follow-ups" value={tiles.pending_followups} />
-        <Tile label="Overdue" value={tiles.overdue} alert={tiles.overdue > 0} />
-        <Tile label="Assigned Tasks" value={tiles.open_tasks} />
-        <Tile label="Overdue Tasks" value={tiles.overdue_tasks} alert={tiles.overdue_tasks > 0} />
       </div>
 
       <div className="dash-grid">
