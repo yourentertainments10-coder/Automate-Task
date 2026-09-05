@@ -253,6 +253,45 @@ class ChangeRequestStatus(models.TextChoices):
     REJECTED = "rejected", "Rejected"
 
 
+class CompletionReviewStatus(models.TextChoices):
+    PENDING = "pending", "Waiting"
+    APPROVED = "approved", "Accepted"
+    REJECTED = "rejected", "Sent back"
+
+
+class TaskCompletion(models.Model):
+    """One submitted completion, waiting for the giver to accept or reject.
+
+    A task can be completed more than once (reject -> redo -> submit again),
+    so this is a history, not a single flag. `pending` is the open one.
+    """
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="completions")
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                     related_name="submitted_completions")
+    # resolved when the work is submitted, so a later change of manager does
+    # not move a review that is already sitting in somebody's inbox
+    approver = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                 on_delete=models.SET_NULL,
+                                 related_name="completions_to_review")
+    note = models.TextField(max_length=2000, blank=True, default="")
+    status = models.CharField(max_length=10, choices=CompletionReviewStatus.choices,
+                              default=CompletionReviewStatus.PENDING)
+    remarks = models.CharField(max_length=500, blank=True, default="")
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                    on_delete=models.SET_NULL,
+                                    related_name="reviewed_completions")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status"]),
+                   models.Index(fields=["approver", "status"])]
+
+    def __str__(self):
+        return f"{self.task.code} completion ({self.status})"
+
+
 class TaskChangeRequest(models.Model):
     """The in-system Modification Request. Nobody (except Admin) edits a task
     directly any more -- a change is PROPOSED here and applied only on

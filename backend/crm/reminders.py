@@ -86,6 +86,39 @@ def send_task_reminders() -> int:
     return sent
 
 
+def delegated_snapshot(user, now, since=None):
+    """What happened to the work THIS person handed out.
+
+    Counts only tasks they gave to somebody else -- their own tasks are the
+    other half of the message and must not be counted twice.
+    """
+    rows = (Task.objects.filter(created_by=user, deleted_at__isnull=True)
+            .exclude(assigned_to=user)
+            .select_related("assigned_to"))
+    open_rows = [t for t in rows if t.status != TaskStatus.DONE]
+    overdue = sorted((t for t in open_rows if t.due_at and t.due_at < now),
+                     key=lambda t: t.due_at)
+    done_since = [t for t in rows
+                  if t.status == TaskStatus.DONE and t.completed_at
+                  and (since is None or timezone.localtime(t.completed_at).date() >= since)]
+    return {"open": open_rows, "overdue": overdue, "done": done_since}
+
+
+def delegated_lines(snap, closed_label):
+    """The section as it appears in the message, or nothing at all when this
+    person gave no work out -- an empty heading is noise."""
+    if not snap["open"] and not snap["done"]:
+        return []
+    lines = ["", "--- Work you gave others ---",
+             f"{closed_label}: {len(snap['done'])}",
+             f"Still open: {len(snap['open'])} "
+             f"(of which {len(snap['overdue'])} overdue)"]
+    for t in snap["overdue"][:3]:
+        who = t.assigned_to.get_full_name() or t.assigned_to.username
+        lines.append(f"  ! {t.code} {t.title[:44]} - {who}")
+    return lines
+
+
 def send_daily_task_digest(force=False) -> int:
     """One morning message per person: due today / overdue / open counts
     with the top tasks — 'aaj ka plan' in a single ping, never spam."""
@@ -116,6 +149,9 @@ def send_daily_task_digest(force=False) -> int:
         lines = [f"⚠ {t.code} {t.title[:60]}" for t in overdue[:4]]
         lines += [f"• {t.code} {t.title[:60]} ({timezone.localtime(t.due_at):%H:%M})"
                   for t in due_today[:4]]
+        # the other half of the morning: what you are waiting on from others
+        given = delegated_snapshot(user, now)
+        lines += delegated_lines(given, "Closed so far")
         notify(
             user, "task_daily",
             f"Your tasks today - {len(due_today)} due, {len(overdue)} overdue, {len(tasks)} open"[:200],
@@ -185,6 +221,7 @@ def send_day_end_digest(force=False) -> int:
                 f"Score this month: {score}",
             ] + ([f"Oldest overdue: {overdue[0].code} - {overdue[0].title[:60]}"]
                  if overdue else [])
+              + delegated_lines(delegated_snapshot(user, now, today), "Closed today")
               + ["", "Close what you can, or post a status update on the rest."]),
             link="/tasks",
             wa_template=("day_end_digest", [

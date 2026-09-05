@@ -6,13 +6,14 @@ from .dashboard import dashboard
 from .task_views import (
     HolidayViewSet, TaskActivityViewSet, TaskCategoryViewSet,
     TaskChangeRequestViewSet, TaskSettingsView, TaskTemplateViewSet,
-    TaskViewSet,
+    TaskViewSet, TaskCompletionViewSet,
 )
 
 router = DefaultRouter()
 router.register("tasks", TaskViewSet, basename="tasks")
 router.register("task-categories", TaskCategoryViewSet, basename="task-categories")
 router.register("task-change-requests", TaskChangeRequestViewSet, basename="task-change-requests")
+router.register("task-completions", TaskCompletionViewSet, basename="task-completions")
 router.register("task-settings", TaskSettingsView, basename="task-settings")
 router.register("task-templates", TaskTemplateViewSet, basename="task-templates")
 router.register("task-activities", TaskActivityViewSet, basename="task-activities")

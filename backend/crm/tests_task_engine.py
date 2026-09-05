@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 from accounts.models import Role, User
 from notifications.models import Notification
 
-from .models import Task, TaskChangeRequest, TaskSettings
+from .models import Task, TaskChangeRequest, TaskSettings, TaskStatus, TaskStatus
 
 MEDIA_TMP = tempfile.mkdtemp()
 
@@ -700,3 +700,165 @@ class VoiceNoteTests(Base):
             res = self.client.post(self.URL, {"audio": self.clip()}, format="multipart")
         self.assertEqual(res.status_code, 400)
         self.assertIn("quieter", str(res.data))
+
+
+class CompletionApprovalTests(Base):
+    """Founders Desk, 05 Sep: the giver accepts or rejects the finished work,
+    and a rejection puts the task back.
+
+    Deliberately NOT a fourth task status: the task completes as before and a
+    review is raised beside it. That also decides who carries a slow approver
+    -- the work counts as done from the moment it was submitted, so nobody is
+    marked late because their manager sat on the review.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.task = Task.objects.create(
+            title="Send the quotation", assigned_to=self.rahul, created_by=self.manager,
+            effort_minutes=60, due_at=timezone.now() + timedelta(days=1))
+
+    def finish(self, who=None, remarks="Sent it and confirmed on call"):
+        self.as_(who or self.rahul)
+        return self.client.post(f"/api/tasks/{self.task.id}/complete/",
+                                {"remarks": remarks, "actual_minutes": 45}, format="json")
+
+    def pending(self):
+        from .models import TaskCompletion
+        return TaskCompletion.objects.filter(task=self.task, status="pending").first()
+
+    # ---- raising it -------------------------------------------------------
+    def test_finishing_asks_the_giver_to_accept(self):
+        self.assertEqual(self.finish().status_code, 200)
+        c = self.pending()
+        self.assertIsNotNone(c)
+        self.assertEqual(c.approver, self.manager)
+        self.assertEqual(c.submitted_by, self.rahul)
+
+    def test_the_giver_is_told(self):
+        self.finish()
+        self.assertTrue(Notification.objects.filter(
+            user=self.manager, type="task_completion_review").exists())
+
+    def test_the_task_is_done_while_the_review_waits(self):
+        """An assignee must not be marked late because the reviewer is slow."""
+        self.finish()
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, TaskStatus.DONE)
+
+    def test_your_own_task_needs_nobody(self):
+        mine = Task.objects.create(title="Mine", assigned_to=self.rahul,
+                                   created_by=self.rahul, effort_minutes=30,
+                                   due_at=timezone.now() + timedelta(days=1))
+        self.as_(self.rahul)
+        self.client.post(f"/api/tasks/{mine.id}/complete/",
+                         {"remarks": "did it myself", "actual_minutes": 10}, format="json")
+        from .models import TaskCompletion
+        self.assertFalse(TaskCompletion.objects.filter(task=mine).exists())
+
+    # ---- accepting --------------------------------------------------------
+    def test_accepting_leaves_the_task_done(self):
+        self.finish()
+        c = self.pending()
+        self.as_(self.manager)
+        res = self.client.post(f"/api/task-completions/{c.id}/review/",
+                               {"decision": "approved"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, TaskStatus.DONE)
+        self.assertTrue(Notification.objects.filter(
+            user=self.rahul, type="task_completion_accepted").exists())
+
+    # ---- rejecting --------------------------------------------------------
+    def test_rejecting_reopens_the_task(self):
+        self.finish()
+        c = self.pending()
+        self.as_(self.manager)
+        res = self.client.post(f"/api/task-completions/{c.id}/review/",
+                               {"decision": "rejected",
+                                "remarks": "The invoice copy is missing"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, TaskStatus.OPEN)
+        self.assertIsNone(self.task.completed_at)
+
+    def test_rejecting_needs_a_reason(self):
+        """"Redo it" with no reason wastes the second attempt too."""
+        self.finish()
+        c = self.pending()
+        self.as_(self.manager)
+        res = self.client.post(f"/api/task-completions/{c.id}/review/",
+                               {"decision": "rejected", "remarks": "no"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("remarks", res.data)
+
+    def test_the_doer_is_told_what_to_fix(self):
+        self.finish()
+        c = self.pending()
+        self.as_(self.manager)
+        self.client.post(f"/api/task-completions/{c.id}/review/",
+                         {"decision": "rejected", "remarks": "The invoice copy is missing"},
+                         format="json")
+        n = Notification.objects.filter(user=self.rahul,
+                                        type="task_completion_rejected").first()
+        self.assertIsNotNone(n)
+        self.assertIn("invoice copy is missing", n.body)
+
+    def test_a_rejected_task_stops_counting_as_completed(self):
+        from .scoring import score_for
+        self.finish()
+        self.assertEqual(score_for(self.rahul)["completed"], 1)
+        c = self.pending()
+        self.as_(self.manager)
+        self.client.post(f"/api/task-completions/{c.id}/review/",
+                         {"decision": "rejected", "remarks": "Not what was asked for"},
+                         format="json")
+        self.assertEqual(score_for(self.rahul)["completed"], 0)
+
+    def test_it_can_be_finished_again_after_a_rejection(self):
+        from .models import TaskCompletion
+        self.finish()
+        c = self.pending()
+        self.as_(self.manager)
+        self.client.post(f"/api/task-completions/{c.id}/review/",
+                         {"decision": "rejected", "remarks": "Attach the invoice copy"},
+                         format="json")
+        self.assertEqual(self.finish(remarks="Invoice attached this time").status_code, 200)
+        self.assertEqual(TaskCompletion.objects.filter(task=self.task).count(), 2)
+        self.assertEqual(TaskCompletion.objects.filter(task=self.task,
+                                                       status="pending").count(), 1)
+
+    # ---- who may decide ---------------------------------------------------
+    def test_the_doer_cannot_accept_their_own_work(self):
+        self.finish()
+        c = self.pending()
+        self.as_(self.rahul)
+        res = self.client.post(f"/api/task-completions/{c.id}/review/",
+                               {"decision": "approved"}, format="json")
+        self.assertIn(res.status_code, (403, 404))
+
+    def test_a_bystander_cannot_decide(self):
+        self.finish()
+        c = self.pending()
+        self.as_(self.amit)
+        res = self.client.post(f"/api/task-completions/{c.id}/review/",
+                               {"decision": "approved"}, format="json")
+        self.assertIn(res.status_code, (403, 404))
+
+    def test_it_cannot_be_decided_twice(self):
+        self.finish()
+        c = self.pending()
+        self.as_(self.manager)
+        self.client.post(f"/api/task-completions/{c.id}/review/",
+                         {"decision": "approved"}, format="json")
+        res = self.client.post(f"/api/task-completions/{c.id}/review/",
+                               {"decision": "rejected", "remarks": "changed my mind"},
+                               format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_the_inbox_shows_only_what_is_mine_to_decide(self):
+        self.finish()
+        self.as_(self.manager)
+        self.assertEqual(len(self.client.get("/api/task-completions/?scope=inbox").data["results"]), 1)
+        self.as_(self.amit)
+        self.assertEqual(len(self.client.get("/api/task-completions/?scope=inbox").data["results"]), 0)

@@ -169,3 +169,103 @@ class RangeBoundsTests(TestCase):
         ms, me = self.bounds("this_month", self.now)
         self.assertLess(ws, ms)          # Monday 31 Aug is before 1 Sep
         self.assertTrue(ws <= ms <= we)  # ...and the month starts mid-week
+
+
+class OverdueCountsAsAMissTests(Base):
+    """Until 05 Sep 2026 the on-time rate divided by tasks that were
+    COMPLETED, so a task nobody touched never entered it -- and that rate
+    carries 60 of the 100 points. Measured on the real formula: four done on
+    time plus one done LATE scored 88; four done on time plus one IGNORED
+    scored 92. Doing nothing beat doing it late.
+
+    An overdue task is now judged, not skipped.
+    """
+
+    def four_on_time(self, who):
+        now = timezone.now()
+        for _ in range(4):
+            mk(who, self.manager, effort_minutes=60, due_at=now - timedelta(days=2),
+               status=TaskStatus.DONE, completed_at=now - timedelta(days=3))
+
+    def score_of(self, who):
+        from crm.scoring import score_for
+        return score_for(who)["score"]
+
+    def test_ignoring_a_task_now_scores_worse_than_doing_it_late(self):
+        now = timezone.now()
+        self.four_on_time(self.rahul)
+        mk(self.rahul, self.manager, effort_minutes=60, due_at=now - timedelta(days=1),
+           status=TaskStatus.DONE, completed_at=now)                 # late
+        self.four_on_time(self.amit)
+        mk(self.amit, self.manager, effort_minutes=60,
+           due_at=now - timedelta(days=1))                           # never touched
+        late, ignored = self.score_of(self.rahul), self.score_of(self.amit)
+        self.assertLess(ignored, late,
+                        f"ignoring ({ignored}) must score below doing it late ({late})")
+
+    def test_the_untouched_task_lands_in_the_denominator(self):
+        from crm.scoring import score_for
+        now = timezone.now()
+        self.four_on_time(self.rahul)
+        mk(self.rahul, self.manager, effort_minutes=60, due_at=now - timedelta(days=1))
+        s = score_for(self.rahul)
+        self.assertEqual(s["scored_completed"], 4)
+        self.assertEqual(s["scored_missed"], 1)
+        # 60*(4/5) + 40*(240/300) = 48 + 32 = 80
+        self.assertEqual(s["score"], 80.0)
+
+    def test_a_task_not_yet_due_is_not_a_miss(self):
+        """Only work that is actually LATE counts against you."""
+        from crm.scoring import score_for
+        now = timezone.now()
+        self.four_on_time(self.rahul)
+        mk(self.rahul, self.manager, effort_minutes=60, due_at=now + timedelta(days=3))
+        s = score_for(self.rahul)
+        self.assertEqual(s["scored_missed"], 0)
+        # on-time stays a clean 4/4; the effort of work not yet done is simply
+        # not earned yet -> 60*(4/4) + 40*(240/300) = 60 + 32
+        self.assertEqual(s["score"], 92.0)
+
+    def test_the_same_task_once_it_is_late_does_count(self):
+        """The pair to the test above: nothing changes but the clock."""
+        from crm.scoring import score_for
+        now = timezone.now()
+        self.four_on_time(self.rahul)
+        mk(self.rahul, self.manager, effort_minutes=60, due_at=now - timedelta(days=1))
+        s = score_for(self.rahul)
+        self.assertEqual(s["scored_missed"], 1)
+        self.assertEqual(s["score"], 80.0)       # 60*(4/5) + 40*(240/300)
+
+    def test_your_own_overdue_task_is_not_a_miss(self):
+        """Self-assigned work is not scored at all, in either direction."""
+        from crm.scoring import score_for
+        now = timezone.now()
+        self.four_on_time(self.rahul)
+        mk(self.rahul, self.rahul, effort_minutes=60, due_at=now - timedelta(days=1))
+        self.assertEqual(score_for(self.rahul)["scored_missed"], 0)
+
+    def test_nothing_done_and_everything_overdue_scores_zero_not_blank(self):
+        """It used to read '—', which looked the same as a clean slate."""
+        from crm.scoring import score_for
+        now = timezone.now()
+        for _ in range(3):
+            mk(self.rahul, self.manager, effort_minutes=60, due_at=now - timedelta(days=1))
+        self.assertEqual(score_for(self.rahul)["score"], 0.0)
+
+    def test_somebody_with_no_tasks_at_all_still_has_no_score(self):
+        from crm.scoring import score_for
+        self.assertIsNone(score_for(self.amit)["score"])
+
+    def test_the_report_page_agrees_with_the_digest(self):
+        """Two scorers, one answer -- 82 here and 74 on WhatsApp would destroy
+        trust in both."""
+        from crm.scoring import score_for
+        now = timezone.now()
+        self.four_on_time(self.rahul)
+        mk(self.rahul, self.manager, effort_minutes=60, due_at=now - timedelta(days=1))
+        self.as_(self.manager)
+        row = next(r for r in
+                   self.client.get("/api/tasks/employees_report/?range=all").data["rows"]
+                   if r["user"] == self.rahul.id)
+        self.assertEqual(row["score"], score_for(self.rahul)["score"])
+        self.assertEqual(row["scored_missed"], 1)

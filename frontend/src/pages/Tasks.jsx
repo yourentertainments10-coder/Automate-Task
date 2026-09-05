@@ -12,6 +12,7 @@ import Directory from './Directory'
 import PersonProfile from './PersonProfile'
 import TaskDetailPanel from './TaskDetail'
 import { ChangeRequests, CompleteModal, DeletedTasks, ProgressModal, RequestChangeModal, WorkloadPanel } from './TaskExtras'
+import CompletionReviews from './CompletionReviews'
 import { useDepartments } from '../useDepartments'
 import FilePick from '../FilePick'
 
@@ -77,9 +78,14 @@ export default function Tasks() {
   useEffect(() => { api('/api/tasks/people/').then(setPeople).catch(() => {}) }, [])
   const hasTeam = isManager || people.length > 1
 
+  // work submitted as done, waiting for this person to accept it
+  const [reviewCount, setReviewCount] = useState(0)
   const refreshInbox = useCallback(() => {
     api('/api/task-change-requests/?scope=inbox&page_size=1')
       .then(d => setInboxCount(d.count ?? (d.results || d).length))
+      .catch(() => {})
+    api('/api/task-completions/?scope=inbox&page_size=1')
+      .then(d => setReviewCount(d.count ?? (d.results || d).length))
       .catch(() => {})
   }, [])
   useEffect(() => { refreshInbox() }, [refreshInbox])
@@ -93,6 +99,7 @@ export default function Tasks() {
     ...(hasTeam ? [['all', 'All Tasks']] : []),
     ['delegated', 'Delegated'],
     ['subscribed', 'Subscribed'],
+    ['reviews', reviewCount > 0 ? `To accept (${reviewCount})` : 'To accept'],
     ['requests', inboxCount > 0 ? `Requests (${inboxCount})` : 'Requests'],
     ['templates', 'Templates'], ['directory', 'Template Directory'],
     ['activities', 'Activities'],
@@ -114,6 +121,7 @@ export default function Tasks() {
           clearPreset={() => setListPreset(null)}
           onRequestsChanged={refreshInbox} />
       )}
+      {area === 'reviews' && <CompletionReviews isAdmin={isAdmin} onChanged={refreshInbox} />}
       {area === 'requests' && <ChangeRequests isAdmin={isAdmin} onChanged={refreshInbox} />}
       {area === 'templates' && <Templates onUse={useTemplate} />}
       {area === 'directory' && <Directory />}

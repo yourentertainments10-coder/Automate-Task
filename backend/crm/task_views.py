@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status as http, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError, NotFound
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -22,15 +22,16 @@ from .ai_tasks import (draft_from_speech, draft_task, proofread,
 from .models import (
     ChangeRequestStatus, EventType, Holiday, LeadEvent, Task, TaskActivity,
     TaskAttachment, TaskCategory, TaskChangeRequest, TaskChecklistItem,
-    TaskFrequency, TaskSettings, TaskStatus, TaskTemplate,
+    CompletionReviewStatus, TaskCompletion, TaskFrequency, TaskSettings,
+    TaskStatus, TaskTemplate,
 )
 from .scoping import (
     assignable_users, can_assign_to, can_edit_task, visible_leads, visible_tasks,
 )
 from .serializers import (
     HolidaySerializer, TaskActivitySerializer, TaskAttachmentSerializer,
-    TaskChangeRequestSerializer, TaskSerializer, TaskSettingsSerializer,
-    TaskTemplateSerializer, UserBriefSerializer,
+    TaskChangeRequestSerializer, TaskCompletionSerializer, TaskSerializer,
+    TaskSettingsSerializer, TaskTemplateSerializer, UserBriefSerializer,
 )
 
 
@@ -76,6 +77,49 @@ def _approvers_for(req: TaskChangeRequest):
     if manager and manager.is_active and manager.pk != req.requested_by_id:
         return [manager]
     return list(_admins().exclude(pk=req.requested_by_id))
+
+
+def _completion_reviewer(task, submitter):
+    """Who accepts or rejects this completion: the person who gave the task.
+
+    Nobody reviews their own work, so a self-assigned task has no reviewer and
+    is simply done. If the giver has left, it falls to their manager and then
+    to the admins -- the same ladder change requests use, so there is one
+    answer to "who decides" in this app, not two.
+    """
+    giver = task.created_by
+    if giver and giver.is_active and giver.pk != submitter.pk:
+        return giver
+    if giver and giver.pk == submitter.pk:
+        return None                      # your own task: nothing to approve
+    mgr = getattr(submitter, "reporting_manager", None)
+    if mgr and mgr.is_active and mgr.pk != submitter.pk:
+        return mgr
+    return _admins().exclude(pk=submitter.pk).first()
+
+
+def _completion_body(c) -> str:
+    """The reviewer decides from this message alone, so it carries the task,
+    who did it, how long it took against the estimate, and what they said."""
+    t = c.task
+    who = (c.submitted_by.get_full_name() or c.submitted_by.username)
+    est = f"{t.effort_minutes}m" if t.effort_minutes else "not set"
+    took = f"{t.actual_minutes}m" if t.actual_minutes else "not recorded"
+    lines = [
+        f"{t.code}: {t.title}",
+        f"Finished by {who}.",
+        f"Time: {took} spent, {est} estimated.",
+    ]
+    if t.due_at:
+        local = timezone.localtime(t.due_at)
+        late = t.completed_at and t.completed_at > t.due_at
+        lines.append(f"Due was {local:%d %b, %I:%M %p}" + (" - finished late." if late else "."))
+    if c.note:
+        lines.append("")
+        lines.append(f"What they did: {c.note[:400]}")
+    lines.append("")
+    lines.append("Accept it, or send it back with a reason.")
+    return NL_JOIN(lines)
 
 
 def _change_request_body(req: TaskChangeRequest, approver) -> str:
@@ -1142,7 +1186,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             # Scoring counts ONLY tasks somebody else handed you: a task you
             # created for yourself earns no points, so nobody can inflate a
             # score by self-assigning easy work.
-            sc_assigned = sc_earned = sc_completed = sc_in_time = 0
+            sc_assigned = sc_earned = sc_completed = sc_in_time = sc_missed = 0
             intervals = []
             for t in sub:
                 # not scored: your own task, or one raised to correct a mistake
@@ -1151,6 +1195,8 @@ class TaskViewSet(viewsets.ModelViewSet):
                     c["self_assigned"] += 1
                 if t["status"] != TaskStatus.DONE and t["due_at"] and t["due_at"] < now:
                     c["overdue"] += 1
+                    if not own:
+                        sc_missed += 1    # judged, not skipped, by the on-time rate
                 if t["status"] == TaskStatus.OPEN:
                     c["pending"] += 1
                 elif t["status"] == TaskStatus.IN_PROGRESS:
@@ -1201,7 +1247,8 @@ class TaskViewSet(viewsets.ModelViewSet):
 
             # Rates behind the score use the delegated tasks only — someone
             # with nothing but self-assigned work scores nothing at all.
-            on_time_rate = (sc_in_time / sc_completed) if sc_completed else None
+            judged = sc_completed + sc_missed      # finished + still overdue
+            on_time_rate = (sc_in_time / judged) if judged else None
             effort_ratio = min(1.0, sc_earned / sc_assigned) if sc_assigned else None
             score = None
             if on_time_rate is not None and effort_ratio is not None:
@@ -1216,6 +1263,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                                             "completed", "in_time", "delayed",
                                             "self_assigned")},
                 "scored_completed": sc_completed,     # delegated + finished
+                "scored_missed": sc_missed,           # delegated + still overdue
                 "time_assigned_minutes": assigned,
                 "time_earned_minutes": earned,
                 "time_spent_minutes": spent,
@@ -1328,7 +1376,30 @@ class TaskViewSet(viewsets.ModelViewSet):
         for f in proof:
             act(task, request.user, f"Completion proof attached: {f.name[:120]}")
         self._after_status_change(task, request.user, old_status, task.assigned_to)
+        self._raise_completion_review(task, request.user, remarks)
         return Response(TaskSerializer(task, context={"request": request}).data)
+
+    def _raise_completion_review(self, task, submitter, note):
+        """Ask the giver to accept the work. The task is already done -- an
+        assignee must not be marked late because their manager was slow."""
+        reviewer = _completion_reviewer(task, submitter)
+        if not reviewer:
+            return                       # own task: nobody to ask
+        c = TaskCompletion.objects.create(
+            task=task, submitted_by=submitter, approver=reviewer, note=note[:2000])
+        notify(
+            reviewer, "task_completion_review",
+            f"Accept or send back: {task.code} {task.title}"[:200],
+            _completion_body(c),
+            link=f"/tasks/{task.id}",
+            link_label="Review the work",
+            wa_template=("task_completion_review", [
+                reviewer.get_full_name() or reviewer.username,
+                task.code,
+                task.title[:60],
+                (submitter.get_full_name() or submitter.username),
+            ]),
+        )
 
     @action(detail=True, methods=["get", "post"])
     def request_change(self, request, pk=None):
@@ -1484,6 +1555,95 @@ class TaskViewSet(viewsets.ModelViewSet):
             "range_from": start.isoformat() if start else None,
             "range_to": end.isoformat() if end else None,
         })
+
+
+class TaskCompletionViewSet(viewsets.ReadOnlyModelViewSet):
+    """Work submitted as done, waiting for the giver to accept it.
+
+      ?scope=inbox  -> waiting for ME to review (default)
+      ?scope=mine   -> completions I submitted
+      ?status=      -> pending | approved | rejected
+
+    POST /{id}/review {decision: approved|rejected, remarks}
+    Rejecting REOPENS the task: it was never actually finished.
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = TaskCompletionSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = TaskCompletion.objects.select_related(
+            "task", "task__assigned_to", "submitted_by", "approver", "reviewed_by")
+        scope = self.request.query_params.get("scope", "inbox")
+        if scope == "mine":
+            qs = qs.filter(submitted_by=user)
+        elif scope == "all":
+            if not has_capability(user, "tasks.view_all"):
+                raise PermissionDenied("Only an admin can see every completion.")
+        else:
+            qs = qs.filter(approver=user)
+        state = self.request.query_params.get("status")
+        if state:
+            qs = qs.filter(status=state)
+        elif scope not in ("mine", "all"):
+            qs = qs.filter(status=CompletionReviewStatus.PENDING)
+        return qs
+
+    @action(detail=True, methods=["post"])
+    def review(self, request, pk=None):
+        # deliberately not get_object(): the inbox queryset hides anything
+        # already decided, and "not found" is a poor answer to a second click
+        # on the same email link. Look it up, then say plainly what happened.
+        c = TaskCompletion.objects.filter(pk=pk).select_related("task", "submitted_by").first()
+        if not c:
+            raise NotFound("That review no longer exists.")
+        if c.approver_id != request.user.id and not has_capability(request.user, "tasks.view_all"):
+            raise PermissionDenied("This is not yours to decide.")
+        if c.status != CompletionReviewStatus.PENDING:
+            raise ValidationError({"detail": f"Already {c.get_status_display().lower()}."})
+
+        decision = str(request.data.get("decision", "")).strip()
+        if decision not in (CompletionReviewStatus.APPROVED, CompletionReviewStatus.REJECTED):
+            raise ValidationError({"decision": "Send approved or rejected."})
+        remarks = str(request.data.get("remarks", "")).strip()
+        if decision == CompletionReviewStatus.REJECTED and len(remarks) < 10:
+            # "redo it" with no reason wastes the next attempt too
+            raise ValidationError(
+                {"remarks": "Say what is wrong — they have to know what to fix."})
+
+        task = c.task
+        c.status = decision
+        c.remarks = remarks[:500]
+        c.reviewed_by = request.user
+        c.reviewed_at = timezone.now()
+        c.save(update_fields=["status", "remarks", "reviewed_by", "reviewed_at"])
+
+        who = request.user.get_full_name() or request.user.username
+        if decision == CompletionReviewStatus.APPROVED:
+            act(task, request.user, f"Completion accepted by {who}"
+                                    + (f": {remarks[:180]}" if remarks else ""))
+            notify(c.submitted_by, "task_completion_accepted",
+                   f"Accepted: {task.code} {task.title}"[:200],
+                   NL_JOIN([f"{who} accepted your work on {task.code}.",
+                            remarks or ""]).strip(),
+                   link=f"/tasks/{task.id}")
+        else:
+            # it was never actually finished, so put it back
+            task.status = TaskStatus.OPEN
+            task.completed_at = None
+            task.progress_percent = 0
+            task.save(update_fields=["status", "completed_at", "progress_percent"])
+            act(task, request.user, f"Completion sent back by {who}: {remarks[:180]}")
+            notify(c.submitted_by, "task_completion_rejected",
+                   f"Sent back: {task.code} {task.title}"[:200],
+                   NL_JOIN([f"{who} sent your work back on {task.code}.",
+                            "",
+                            f"Reason: {remarks}",
+                            "",
+                            "The task is open again — fix it and complete it."]),
+                   link=f"/tasks/{task.id}",
+                   link_label="Open the task")
+        return Response(TaskCompletionSerializer(c).data)
 
 
 class TaskChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):

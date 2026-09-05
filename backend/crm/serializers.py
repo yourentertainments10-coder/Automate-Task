@@ -6,6 +6,7 @@ from accounts.serializers import DepartmentField
 from .models import (
     AssignmentRule, Holiday, Lead, LeadDocument, LeadEvent, Quotation,
     Task, TaskActivity, TaskAttachment, TaskCategory, TaskChangeRequest,
+    TaskCompletion,
     TaskChecklistItem, TaskSettings, TaskTemplate,
 )
 
@@ -291,6 +292,25 @@ class TaskChangeRequestSerializer(serializers.ModelSerializer):
             except (TypeError, ValueError):
                 raise serializers.ValidationError("effort_minutes must be a positive number.")
         return value
+
+
+class TaskCompletionSerializer(serializers.ModelSerializer):
+    submitted_by = UserBriefSerializer(read_only=True)
+    reviewed_by = UserBriefSerializer(read_only=True)
+    task_code = serializers.CharField(source="task.code", read_only=True)
+    task_title = serializers.CharField(source="task.title", read_only=True)
+    task_effort_minutes = serializers.IntegerField(source="task.effort_minutes", read_only=True)
+    task_actual_minutes = serializers.IntegerField(source="task.actual_minutes", read_only=True)
+    task_due_at = serializers.DateTimeField(source="task.due_at", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = TaskCompletion
+        fields = ["id", "task", "task_code", "task_title", "task_due_at",
+                  "task_effort_minutes", "task_actual_minutes",
+                  "submitted_by", "note", "status", "status_display",
+                  "remarks", "reviewed_by", "reviewed_at", "created_at"]
+        read_only_fields = fields
 
 
 class TaskSettingsSerializer(serializers.ModelSerializer):

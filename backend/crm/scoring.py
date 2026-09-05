@@ -10,6 +10,9 @@ The rules, unchanged from the Reports page:
     penalty already covers that error, and charging the effort ratio as well
     would dock the same person twice for one mistake, invisibly
   * score = 60 x on-time rate + 40 x (effort earned / effort assigned)
+  * on-time rate counts tasks FINISHED on time out of (finished + still
+    overdue) -- an untouched task is a miss, not an absence. Dividing by
+    completed alone meant ignoring work scored better than doing it late.
   * logged mistakes subtract from it
 """
 from django.utils import timezone
@@ -41,7 +44,7 @@ def score_for(user, start=None, end=None) -> dict:
     corrective = corrective_task_ids([r["id"] for r in rows])
 
     completed = pending = overdue = 0
-    sc_completed = sc_in_time = sc_assigned = sc_earned = 0
+    sc_completed = sc_in_time = sc_assigned = sc_earned = sc_missed = 0
     for t in rows:
         anchor = timezone.localtime(t["due_at"] or t["created_at"]).date()
         if start and not (start <= anchor <= end):
@@ -62,10 +65,15 @@ def score_for(user, start=None, end=None) -> dict:
             pending += 1
             if t["due_at"] and t["due_at"] < now:
                 overdue += 1
+                if not own:
+                    # judged, not skipped: leaving a task untouched used to
+                    # keep the on-time rate spotless
+                    sc_missed += 1
         if not own:
             sc_assigned += effort
 
-    on_time = (sc_in_time / sc_completed) if sc_completed else None
+    judged = sc_completed + sc_missed
+    on_time = (sc_in_time / judged) if judged else None
     ratio = min(1.0, sc_earned / sc_assigned) if sc_assigned else None
     if on_time is None:
         score = None
@@ -80,4 +88,5 @@ def score_for(user, start=None, end=None) -> dict:
         score = round(max(0, score - (pen.get("penalty") or 0)), 1)
 
     return {"completed": completed, "pending": pending, "overdue": overdue,
-            "scored_completed": sc_completed, "score": score}
+            "scored_completed": sc_completed, "scored_missed": sc_missed,
+            "score": score}
