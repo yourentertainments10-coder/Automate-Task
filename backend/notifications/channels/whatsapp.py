@@ -44,7 +44,14 @@ def _post(payload: dict) -> dict:
             timeout=15,
         )
         if res.status_code < 300:
-            return {"channel": "whatsapp", "status": "sent", "detail": ""}
+            # Meta's id for this message. Without it the delivery callback
+            # cannot be tied back to anything, and "sent" is all we ever know.
+            wamid = ""
+            try:
+                wamid = (res.json().get("messages") or [{}])[0].get("id", "")
+            except ValueError:
+                pass
+            return {"channel": "whatsapp", "status": "sent", "detail": "", "wamid": wamid}
         log.warning("WhatsApp send failed %s: %s", res.status_code, res.text[:300])
         return {"channel": "whatsapp", "status": "error", "detail": f"HTTP {res.status_code}"}
     except requests.RequestException as exc:

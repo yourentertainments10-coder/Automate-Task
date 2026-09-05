@@ -7,6 +7,7 @@ import { Bar } from 'react-chartjs-2'
 import { api, apiUpload, errorText } from '../api'
 import { useAuth } from '../auth'
 import ProofreadText from '../ProofreadText'
+import VoiceNote from '../VoiceNote'
 import Directory from './Directory'
 import PersonProfile from './PersonProfile'
 import TaskDetailPanel from './TaskDetail'
@@ -859,10 +860,51 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
     effort: '', effort_unit: 'minutes',
   })
   const [assignees, setAssignees] = useState([])   // nobody pre-picked — see the note in submit()
+  // Who was filled in from a group, so the form can say so and the count
+  // stays honest after somebody is removed by hand.
+  const [fromGroup, setFromGroup] = useState(null)
+
+  /* Picking a group is a shortcut for picking its people -- it does not make
+     the group itself own anything. Members outside this person's assignment
+     level are left out rather than silently granted. */
+  function pickGroup(e) {
+    const id = e.target.value
+    setF(prev => ({ ...prev, group: id }))
+    const g = groups.find(x => String(x.id) === String(id))
+    if (!g) { setFromGroup(null); return }
+    const allowed = new Set(team.map(t => t.id))
+    const members = (g.members_detail || []).map(m => m.id).filter(mid => allowed.has(mid))
+    const skipped = (g.members_detail || []).length - members.length
+    setAssignees(members)
+    setFromGroup({ name: g.name, added: members.length, skipped })
+  }
   const [categories, setCategories] = useState([])
   const [inLoop, setInLoop] = useState([])          // Loop: colleagues who follow the task
   const [workloads, setWorkloads] = useState([])    // C1: pipeline per picked assignee
   const [aiPrompt, setAiPrompt] = useState(null)    // E3: null = closed
+  // T-00136: what a spoken note produced, kept so the form can show what was
+  // heard and what could not be placed
+  const [voice, setVoice] = useState(null)
+
+  /* Fill the form from a voice note. Only fields the speaker actually
+     mentioned are touched -- a note that names nobody must not wipe an
+     assignee already picked by hand. */
+  function applyVoice(d) {
+    setVoice(d)
+    setF(prev => ({
+      ...prev,
+      title: d.title || prev.title,
+      description: d.description || prev.description,
+      due_at: d.due_at
+        ? new Date(new Date(d.due_at).getTime() - new Date().getTimezoneOffset() * 60000)
+          .toISOString().slice(0, 16)
+        : prev.due_at,
+      effort: d.effort_minutes ? String(d.effort_minutes) : prev.effort,
+      effort_unit: d.effort_minutes ? 'minutes' : prev.effort_unit,
+    }))
+    if (d.checklist?.length) setSteps(prev => prev.length ? prev : d.checklist)
+    if (d.assigned_to) setAssignees([d.assigned_to])
+  }
   // The assigner breaks the task into steps here; the assignee ticks them
   // off one by one and cannot complete the task until all are done.
   const [steps, setSteps] = useState([])
@@ -971,10 +1013,28 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
         <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {template ? `New task from "${template.name}"` : 'Add Task'}
           <span style={{ flex: 1 }} />
+          <VoiceNote onDraft={applyVoice} disabled={busy} />
           <button type="button" className="btn btn-sm"
             title="Describe the task in your words — AI drafts title, description & checklist"
             onClick={() => setAiPrompt(p => p === null ? '' : null)}>✨ AI draft</button>
         </h2>
+        {voice && (
+          <div className="voice-heard">
+            <div className="voice-line"><strong>Heard:</strong> “{voice.transcript}”</div>
+            {(voice.assignee_heard || voice.due_heard) && (
+              <div className="voice-line warn">
+                {voice.assignee_heard && (
+                  <>Could not place the name <strong>“{voice.assignee_heard}”</strong> — pick the person below. </>
+                )}
+                {voice.due_heard && <>The time it heard has already passed — set the due date below. </>}
+              </div>
+            )}
+            <div className="voice-line muted small">
+              Check every field before creating — this was filled in from speech.
+            </div>
+            <button type="button" className="linkish" onClick={() => setVoice(null)}>Hide</button>
+          </div>
+        )}
         {aiPrompt !== null && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             <input value={aiPrompt} autoFocus style={{ flex: 1 }}
@@ -998,8 +1058,18 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
           <div>
             <label>Assign to *</label>
             <div className="hint">Your level and below. Each person gets their own copy.</div>
-            <MultiSelect options={team} selected={assignees} onChange={setAssignees}
+            <MultiSelect options={team} selected={assignees}
+              onChange={v => { setAssignees(v); if (fromGroup) setFromGroup({ ...fromGroup, edited: true }) }}
               placeholder="— pick people —" />
+            {fromGroup && (
+              <div className="small muted" style={{ marginTop: 4 }}>
+                {fromGroup.added} from <strong>{fromGroup.name}</strong>
+                {fromGroup.skipped > 0 && (
+                  <> · {fromGroup.skipped} skipped (above your level)</>
+                )}
+                {' — '}remove anyone who should not get this.
+              </div>
+            )}
             {assignees.length === 0 && (
               <button type="button" className="btn btn-sm" style={{ marginTop: 4 }}
                 onClick={() => setAssignees([user.id])}>Assign to myself</button>
@@ -1100,9 +1170,14 @@ function TaskModal({ user, team, groups = [], template, onClose, onSaved }) {
           </div>
           <div>
             <label>Group</label>
-            <select value={f.group} onChange={set('group')}>
+            <div className="hint">Picking one fills Assign to with its members.</div>
+            <select value={f.group} onChange={pickGroup}>
               <option value="">None</option>
-              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              {groups.map(g => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({g.member_count} member{g.member_count === 1 ? '' : 's'})
+                </option>
+              ))}
             </select>
           </div>
           <div>

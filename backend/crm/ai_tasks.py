@@ -44,6 +44,58 @@ Reply with ONLY the corrected text. No quotes, no explanation, no preamble."""
 
 # ---------------------------------------------------------------------------
 
+VOICE_SYSTEM = """You turn a spoken note into an internal task for an Indian
+auto-parts business. The speaker mixes Hindi and English; understand both.
+
+Reply with ONLY a JSON object:
+{"title": "<max 12 words, imperative>",
+ "description": "<what exactly to do and what done looks like>",
+ "checklist": ["<0-6 short tickable steps, only if the speaker listed steps>"],
+ "assignee": "<the person's name EXACTLY as spoken, or null if none was named>",
+ "due_at": "<ISO 8601 local datetime, or null if no time was mentioned>",
+ "effort_minutes": <number, or null if not mentioned>}
+
+Rules:
+- Never invent a person. If no name was spoken, assignee is null.
+- Never invent a deadline. If no time was spoken, due_at is null.
+- "kal" = tomorrow, "parso" = day after, "shaam" = evening (17:00),
+  "subah" = morning (10:00), "raat" = night (20:00).
+- A bare hour with no am/pm during working talk means the afternoon:
+  "5 baje" is 17:00, not 05:00."""
+
+
+def draft_from_speech(transcript: str, now, known_names=()) -> dict:
+    """Spoken words -> the fields of a task form. Everything is a SUGGESTION;
+    the caller resolves the name and re-checks the date."""
+    text = (transcript or "").strip()
+    if not text:
+        return {"provider": "rules"}
+    system = VOICE_SYSTEM + (
+        f"\n\nRight now it is {now:%A %d %B %Y, %H:%M}."
+        + (f"\nPeople who may be named: {', '.join(known_names)}." if known_names else "")
+    )
+    # somebody is standing there having just spoken -- wait longer than a
+    # background call would, and fall back to rules rather than fail
+    data = llm.chat_json(system, text, max_tokens=900, timeout=75) or {}
+    if not data.get("title"):
+        base = draft_task(text)          # the deterministic fallback still applies
+        return {**base, "assignee": None, "due_at": None, "effort_minutes": None}
+    effort = data.get("effort_minutes")
+    try:
+        effort = int(effort) if effort not in (None, "") else None
+    except (TypeError, ValueError):
+        effort = None
+    return {
+        "title": str(data["title"])[:200],
+        "description": str(data.get("description", ""))[:2000],
+        "checklist": [str(s)[:200] for s in (data.get("checklist") or [])][:8],
+        "assignee": (str(data["assignee"])[:80] if data.get("assignee") else None),
+        "due_at": (str(data["due_at"])[:40] if data.get("due_at") else None),
+        "effort_minutes": effort if (effort and 0 < effort <= 60 * 24 * 30) else None,
+        "provider": llm.provider(),
+    }
+
+
 def draft_task(prompt: str) -> dict:
     prompt = (prompt or "").strip()
     if llm.enabled():

@@ -139,3 +139,100 @@ class ClearNotificationsTests(ChannelsDisabledMixin, TestCase):
         """Everyone gets this, not just admins -- everyone's list fills up."""
         self.as_(self.emp)
         self.assertEqual(self.client.post("/api/notifications/clear/").status_code, 200)
+
+
+class WhatsAppDeliveryTests(ChannelsDisabledMixin, TestCase):
+    """"The system says it was sent" used to be the only answer available,
+    because Meta's delivery callback was thrown away. Now a message is
+    followed from accepted to delivered, read, or failed-and-why."""
+
+    WEBHOOK = "/api/webhooks/whatsapp"
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.who = make("wa.user", Role.SALES_EXECUTIVE, department="sales",
+                        whatsapp_phone="7004130460")
+
+    def sent(self, wamid="wamid.TEST1"):
+        from notifications.delivery import WhatsAppDelivery
+        return WhatsAppDelivery.objects.create(
+            wamid=wamid, user=self.who, phone=self.who.whatsapp_phone,
+            template="new_task_assigne", status="accepted")
+
+    def callback(self, wamid, status, errors=None):
+        body = {"entry": [{"changes": [{"value": {"statuses": [
+            {"id": wamid, "status": status, "recipient_id": "917004130460",
+             **({"errors": errors} if errors else {})}]}}]}]}
+        return self.client.post(self.WEBHOOK, body, format="json")
+
+    def test_a_send_is_recorded_with_metas_id(self):
+        from unittest import mock
+        from notifications.delivery import WhatsAppDelivery
+        from notifications.service import notify
+        fake = {"channel": "whatsapp", "status": "sent", "detail": "",
+                "wamid": "wamid.ABC"}
+        with mock.patch("notifications.channels.whatsapp.send_template", return_value=fake), \
+             mock.patch("notifications.channels.gmail.send_email",
+                        return_value={"channel": "gmail", "status": "skipped"}):
+            notify(self.who, "task_assigned", "T-00136", wa_template=("new_task_assigne", []))
+        row = WhatsAppDelivery.objects.get(wamid="wamid.ABC")
+        self.assertEqual(row.user, self.who)
+        self.assertEqual(row.status, "accepted")
+        self.assertEqual(row.template, "new_task_assigne")
+
+    def test_delivered_is_written_down(self):
+        row = self.sent()
+        self.assertEqual(self.callback(row.wamid, "delivered").status_code, 200)
+        row.refresh_from_db()
+        self.assertEqual(row.status, "delivered")
+
+    def test_read_is_written_down(self):
+        row = self.sent()
+        self.callback(row.wamid, "read")
+        row.refresh_from_db()
+        self.assertEqual(row.status, "read")
+
+    def test_a_failure_records_why(self):
+        """The answer that was missing: it did not arrive, and here is why."""
+        row = self.sent()
+        self.callback(row.wamid, "failed", errors=[{
+            "code": 131026, "title": "Message undeliverable",
+            "message": "Receiver is incapable of receiving this message"}])
+        row.refresh_from_db()
+        self.assertEqual(row.status, "failed")
+        self.assertIn("131026", row.detail)
+        self.assertIn("undeliverable", row.detail.lower())
+
+    def test_a_late_callback_cannot_walk_it_backwards(self):
+        """Meta may deliver 'sent' after 'read'; the message stays read."""
+        row = self.sent()
+        self.callback(row.wamid, "read")
+        self.callback(row.wamid, "sent")
+        row.refresh_from_db()
+        self.assertEqual(row.status, "read")
+
+    def test_a_failure_always_wins_even_if_late(self):
+        row = self.sent()
+        self.callback(row.wamid, "delivered")
+        self.callback(row.wamid, "failed", errors=[{"code": 131047, "title": "Re-engagement"}])
+        row.refresh_from_db()
+        self.assertEqual(row.status, "failed")
+
+    def test_an_unknown_id_is_ignored_quietly(self):
+        """Messages sent before this table existed must not error the webhook —
+        Meta retries a non-200 for days."""
+        self.assertEqual(self.callback("wamid.NEVER_SEEN", "delivered").status_code, 200)
+
+    def test_a_malformed_status_does_not_break_the_webhook(self):
+        body = {"entry": [{"changes": [{"value": {"statuses": [{"nonsense": True}]}}]}]}
+        self.assertEqual(self.client.post(self.WEBHOOK, body, format="json").status_code, 200)
+
+    def test_incoming_messages_still_work_alongside_statuses(self):
+        body = {"entry": [{"changes": [{"value": {
+            "contacts": [{"wa_id": "919999999999", "profile": {"name": "Ravi"}}],
+            "messages": [{"id": "wamid.IN1", "from": "919999999999",
+                          "type": "text", "text": {"body": "hello"}}],
+            "statuses": [{"id": "wamid.TEST1", "status": "delivered"}],
+        }}]}]}
+        self.assertEqual(self.client.post(self.WEBHOOK, body, format="json").status_code, 200)

@@ -32,7 +32,9 @@ class GroupViewSet(viewsets.ModelViewSet):
     pagination_class = None
 
     def get_queryset(self):
-        qs = visible_groups(self.request.user)
+        # members_detail is read on every row (the task form fills Assign to
+        # from it), so prefetch rather than one query per group
+        qs = visible_groups(self.request.user).prefetch_related("members").select_related("owner")
         if self.request.query_params.get("active") == "true":
             qs = qs.filter(active=True)
         return qs

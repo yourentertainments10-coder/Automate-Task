@@ -64,8 +64,41 @@ def whatsapp_webhook(request):
                         for c in value.get("contacts", [])}
             for m in value.get("messages", []):
                 created += _ingest(m, contacts)
+            # Meta reports delivered / read / failed on the same webhook.
+            # These used to be dropped, which is why "did it arrive?" had no
+            # answer -- our record stopped at "Meta accepted it".
+            for s in value.get("statuses", []):
+                _record_status(s)
     # Always 200 fast -- Meta retries on anything else.
     return JsonResponse({"status": "ok", "ingested": created})
+
+
+def _record_status(s: dict) -> None:
+    """One delivery update from Meta. Never raises: a webhook that errors is
+    retried for days."""
+    from notifications.delivery import WhatsAppDelivery
+    wamid, status = s.get("id", ""), s.get("status", "")
+    if not wamid or not status:
+        return
+    detail = ""
+    for err in s.get("errors", []) or []:
+        detail = f"{err.get('code', '')} {err.get('title', '')} {err.get('message', '')}".strip()
+        break
+    try:
+        row = WhatsAppDelivery.objects.filter(wamid=wamid).first()
+        if not row:
+            return                       # sent before this table existed
+        # Meta can deliver callbacks out of order; never walk a message
+        # backwards from read to sent.
+        rank = {"accepted": 0, "sent": 1, "delivered": 2, "read": 3, "failed": 4}
+        if rank.get(status, 0) < rank.get(row.status, 0) and status != "failed":
+            return
+        row.status = status
+        if detail:
+            row.detail = detail[:500]
+        row.save(update_fields=["status", "detail", "updated_at"])
+    except Exception:                    # noqa: BLE001
+        log.warning("could not record delivery status", exc_info=True)
 
 
 def _ingest(m: dict, contacts: dict) -> int:

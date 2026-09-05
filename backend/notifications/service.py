@@ -8,6 +8,21 @@ from .channels import gmail, whatsapp
 from .models import Notification
 
 
+def _remember_whatsapp(user, result: dict, template: str) -> None:
+    """Meta reports delivery later, on a callback that carries only the
+    message id. Without this row that callback has nothing to attach to, and
+    "accepted by Meta" stays the only thing anyone can ever find out."""
+    wamid = (result or {}).get("wamid")
+    if not wamid:
+        return
+    from .delivery import WhatsAppDelivery
+    WhatsAppDelivery.objects.update_or_create(
+        wamid=wamid,
+        defaults={"user": user, "phone": user.whatsapp_phone or "",
+                  "template": template, "status": "accepted"},
+    )
+
+
 def notify(user, type_: str, title: str, body: str = "", link: str = "",
            wa_template: tuple[str, list] | None = None,
            link_label: str = "Open in Automate Task") -> Notification:
@@ -20,9 +35,11 @@ def notify(user, type_: str, title: str, body: str = "", link: str = "",
         user.email, f"[Automation Task] {title}", body or title,
         link=link, link_label=link_label))
     if wa_template:
-        results.append(whatsapp.send_template(user.whatsapp_phone, wa_template[0], wa_template[1]))
+        wa = whatsapp.send_template(user.whatsapp_phone, wa_template[0], wa_template[1])
     else:
-        results.append(whatsapp.send_text(user.whatsapp_phone, f"{title}\n{body}".strip()))
+        wa = whatsapp.send_text(user.whatsapp_phone, f"{title}\n{body}".strip())
+    results.append(wa)
+    _remember_whatsapp(user, wa, wa_template[0] if wa_template else "")
     return Notification.objects.create(
         user=user, type=type_, title=title, body=body, link=link, channels=results,
     )

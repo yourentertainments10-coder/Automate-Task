@@ -326,3 +326,86 @@ class GroupMemberPickingTests(Base):
         self.assertIn(res.status_code, (403, 404))
         self.as_(self.manager)
         self.assertEqual(self.client.get(f"/api/groups/{gid}/").data["member_count"], 1)
+
+
+class GroupAsAssignShortcutTests(Base):
+    """Picking a group is a shortcut for picking its people. It does NOT make
+    the group own anything: the task still belongs to one person, and five
+    members still means five separate tasks with five separate scores. Five
+    people sharing one task could not be scored fairly; five copies can."""
+
+    def setUp(self):
+        super().setUp()
+        self.as_(self.manager)
+        self.gid = self.client.post(
+            "/api/groups/",
+            {"name": "CRM Team", "members": [self.rahul.id, self.amit.id]},
+            format="json").data["id"]
+
+    def members_of(self, gid):
+        return {m["id"] for m in self.client.get(f"/api/groups/{gid}/").data["members_detail"]}
+
+    def test_the_form_can_read_the_members_off_the_list(self):
+        """The Assign to field fills from members_detail on the list call, so
+        it must be there without fetching each group one at a time."""
+        rows = self.client.get("/api/groups/?active=true").data
+        row = next(g for g in rows if g["id"] == self.gid)
+        self.assertIn("members_detail", row)
+        self.assertEqual(row["member_count"], 3)          # + the creator
+
+    def test_one_task_per_member_each_owned_by_one_person(self):
+        from crm.models import Task
+        for uid in sorted(self.members_of(self.gid)):
+            res = self.client.post("/api/tasks/", {
+                "title": "August expense sheet", "assigned_to": uid,
+                "group": self.gid, "effort_minutes": 45, "category": "Calls",
+                "due_at": (timezone.now() + timedelta(days=1)).isoformat(),
+            }, format="json")
+            self.assertEqual(res.status_code, 201, res.data)
+        made = Task.objects.filter(group_id=self.gid)
+        self.assertEqual(made.count(), 3)
+        # every task has exactly one owner, and no two share one
+        self.assertEqual(len({t.assigned_to_id for t in made}), 3)
+
+    def test_the_group_tag_survives_on_every_copy(self):
+        from crm.models import Task
+        self.client.post("/api/tasks/", {
+            "title": "T", "assigned_to": self.rahul.id, "group": self.gid,
+            "effort_minutes": 30, "category": "Calls",
+            "due_at": (timezone.now() + timedelta(days=1)).isoformat(),
+        }, format="json")
+        self.assertEqual(Task.objects.get(group_id=self.gid).group_id, self.gid)
+
+    def test_a_group_task_is_visible_to_every_member(self):
+        """The point of the group tag: teammates can see each other's copy."""
+        self.client.post("/api/tasks/", {
+            "title": "Shared sight", "assigned_to": self.rahul.id, "group": self.gid,
+            "effort_minutes": 30, "category": "Calls",
+            "due_at": (timezone.now() + timedelta(days=1)).isoformat(),
+        }, format="json")
+        self.as_(self.amit)          # a member, but not the assignee or creator
+        titles = [t["title"] for t in self.client.get("/api/tasks/").data["results"]]
+        self.assertIn("Shared sight", titles)
+
+    def test_a_non_member_still_cannot_see_it(self):
+        self.client.post("/api/tasks/", {
+            "title": "Private to the group", "assigned_to": self.rahul.id,
+            "group": self.gid, "effort_minutes": 30, "category": "Calls",
+            "due_at": (timezone.now() + timedelta(days=1)).isoformat(),
+        }, format="json")
+        outsider = make("outsider", Role.WAREHOUSE, "warehouse")
+        self.as_(outsider)
+        titles = [t["title"] for t in self.client.get("/api/tasks/").data["results"]]
+        self.assertNotIn("Private to the group", titles)
+
+    def test_scoring_is_untouched_by_the_group(self):
+        """Each copy scores its own owner. The scorer never looks at groups --
+        this test fails the moment somebody makes it."""
+        import inspect
+        from crm import scoring
+        self.assertNotIn("group", inspect.getsource(scoring).lower(),
+                         "scoring.py mentions groups — a group must not affect a person's score")
+
+    def test_only_a_manager_or_admin_can_create_a_group(self):
+        self.as_(self.rahul)
+        self.assertEqual(self.client.post("/api/groups/", {"name": "Nope"}).status_code, 403)

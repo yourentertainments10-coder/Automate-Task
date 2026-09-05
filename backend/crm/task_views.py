@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.db.models import Count, F, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import status as http, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -14,7 +15,10 @@ from accounts.models import User
 from accounts.permissions import HasCapability, has_capability
 from notifications.service import notify
 
-from .ai_tasks import draft_task, proofread, review_sentence, summarize_task
+from config import llm
+
+from .ai_tasks import (draft_from_speech, draft_task, proofread,
+                       review_sentence, summarize_task)
 from .models import (
     ChangeRequestStatus, EventType, Holiday, LeadEvent, Task, TaskActivity,
     TaskAttachment, TaskCategory, TaskChangeRequest, TaskChecklistItem,
@@ -681,6 +685,77 @@ class TaskViewSet(viewsets.ModelViewSet):
         if len(text) > 4000:
             raise ValidationError({"text": "Too long to check — keep it under 4000 characters."})
         return Response(proofread(text))
+
+    # a voice note is short; anything longer is a meeting, not a task
+    VOICE_MAX_BYTES = 10 * 1024 * 1024
+
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser, FormParser])
+    def voice_draft(self, request):
+        """T-00136: speak a task, get the form filled in. Creates nothing."""
+        clip = request.FILES.get("audio")
+        if not clip:
+            raise ValidationError({"audio": "Record something first."})
+        if clip.size > self.VOICE_MAX_BYTES:
+            raise ValidationError({"audio": "That recording is too long — keep it under a minute or two."})
+        if not llm.can_transcribe():
+            raise ValidationError({"audio":
+                "Voice notes need the Gemini key. Type the task instead."})
+
+        people = list(assignable_users(request.user)
+                      .order_by("first_name", "username")[:200])
+        names = [(u.get_full_name() or u.username).strip() for u in people]
+
+        transcript = llm.transcribe(clip.read(), clip.content_type or "audio/webm",
+                                    hint=", ".join(names[:60]))
+        if not transcript:
+            raise ValidationError({"audio":
+                "Could not make out the recording — try again somewhere quieter, "
+                "or type it."})
+
+        now = timezone.now()
+        draft = draft_from_speech(transcript, timezone.localtime(now), names)
+
+        # ---- who: matched here, never chosen by the model -----------------
+        assigned_to = assigned_to_name = None
+        spoken = (draft.get("assignee") or "").strip().lower()
+        if spoken:
+            # A full name wins over a partial one, but only if exactly one
+            # person has it. Two colleagues with the same name means we do not
+            # know who was meant -- say so rather than pick the first row.
+            exact = [u for u, n in zip(people, names) if n.lower() == spoken]
+            loose = [u for u, n in zip(people, names)
+                     if spoken in n.lower() or n.lower().split()[0] == spoken]
+            match = (exact[0] if len(exact) == 1
+                     else loose[0] if (not exact and len(loose) == 1) else None)
+            if match:
+                assigned_to = match.id
+                assigned_to_name = match.get_full_name() or match.username
+
+        # ---- when: same past-deadline guard as the typed form -------------
+        due_at = None
+        raw_due = draft.get("due_at")
+        if raw_due:
+            parsed = parse_datetime(str(raw_due))
+            if parsed:
+                if timezone.is_naive(parsed):
+                    parsed = timezone.make_aware(parsed)
+                if parsed > now:
+                    due_at = parsed.isoformat()
+
+        return Response({
+            "transcript": transcript,
+            "title": draft.get("title", ""),
+            "description": draft.get("description", ""),
+            "checklist": draft.get("checklist", []),
+            "assigned_to": assigned_to,
+            "assigned_to_name": assigned_to_name,
+            # said a name we could not place -- tell them rather than guessing
+            "assignee_heard": draft.get("assignee") if not assigned_to else None,
+            "due_at": due_at,
+            "due_heard": raw_due if (raw_due and not due_at) else None,
+            "effort_minutes": draft.get("effort_minutes"),
+            "provider": draft.get("provider"),
+        })
 
     @action(detail=True, methods=["post"])
     def summarize(self, request, pk=None):

@@ -23,3 +23,8 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"[{self.type}] {self.title} -> {self.user}"
+
+
+# Delivery outcomes for WhatsApp live in their own module but must be
+# imported here so Django picks the model up.
+from .delivery import WhatsAppDelivery  # noqa: E402,F401

@@ -567,3 +567,136 @@ class ProofreadTests(Base):
                                    {"text": "Call the vender.\nConfrim the delivery date."},
                                    format="json")
         self.assertEqual(res.data["text"].count("\n"), 1)
+
+
+class VoiceNoteTests(Base):
+    """T-00136: speak a task, get the form filled in.
+
+    The model hears words. It never picks a user id and never creates a task,
+    because a misheard name would quietly become somebody else's work. These
+    tests pin that split: whatever the model says, the SERVER decides who the
+    person is and whether the deadline is usable.
+    """
+
+    URL = "/api/tasks/voice_draft/"
+
+    def clip(self, name="note.webm"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return SimpleUploadedFile(name, b"x" * 4096, content_type="audio/webm")
+
+    def draft(self, transcript, ai_reply, as_user=None):
+        """Run the endpoint with transcription and drafting both stubbed."""
+        from unittest import mock
+        self.as_(as_user or self.manager)
+        with mock.patch("config.llm.can_transcribe", return_value=True), \
+             mock.patch("config.llm.transcribe", return_value=transcript), \
+             mock.patch("crm.ai_tasks.llm.chat_json", return_value=ai_reply):
+            return self.client.post(self.URL, {"audio": self.clip()}, format="multipart")
+
+    # ---- what it gets right ------------------------------------------------
+    def test_a_named_person_is_matched_to_a_real_user(self):
+        res = self.draft("Rahul ko quotation bhejna hai",
+                         {"title": "Send the quotation", "assignee": "rahul"})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["assigned_to"], self.rahul.id)
+        self.assertIsNone(res.data["assignee_heard"])
+
+    def test_a_first_name_is_enough(self):
+        res = self.draft("Amit ko bolo", {"title": "Tell Amit", "assignee": "Amit"})
+        self.assertEqual(res.data["assigned_to"], self.amit.id)
+
+    def test_the_transcript_comes_back_so_it_can_be_read(self):
+        res = self.draft("stock check karna hai", {"title": "Stock check"})
+        self.assertEqual(res.data["transcript"], "stock check karna hai")
+
+    def test_a_future_deadline_is_kept(self):
+        soon = (timezone.now() + timedelta(days=1)).isoformat()
+        res = self.draft("kal tak", {"title": "T", "due_at": soon})
+        self.assertIsNotNone(res.data["due_at"])
+        self.assertIsNone(res.data["due_heard"])
+
+    # ---- what it refuses to guess -----------------------------------------
+    def test_an_unknown_name_is_reported_not_guessed(self):
+        res = self.draft("Ramesh ko bolo", {"title": "T", "assignee": "Ramesh"})
+        self.assertIsNone(res.data["assigned_to"])
+        self.assertEqual(res.data["assignee_heard"], "Ramesh")
+
+    def test_a_past_deadline_is_dropped_and_flagged(self):
+        """The same AM/PM trap as the typed form: 5 PM heard as 5 AM."""
+        past = (timezone.now() - timedelta(hours=6)).isoformat()
+        res = self.draft("paanch baje tak", {"title": "T", "due_at": past})
+        self.assertIsNone(res.data["due_at"])
+        self.assertEqual(res.data["due_heard"], past)
+
+    def test_a_name_above_the_speakers_level_is_not_matched(self):
+        """An employee speaking their boss's name must not gain the power to
+        task them -- the level rule applies to speech exactly as to typing."""
+        res = self.draft("boss ko bolo", {"title": "T", "assignee": "boss"},
+                         as_user=self.rahul)
+        self.assertIsNone(res.data["assigned_to"])
+        self.assertEqual(res.data["assignee_heard"], "boss")
+
+    def two_rahuls(self):
+        """The fixture user is literally called "rahul", which would be an
+        exact match; give everyone a surname so only the first name is shared."""
+        from accounts.models import Role
+        User.objects.filter(pk=self.rahul.pk).update(first_name="Rahul", last_name="Sinha")
+        make("rahul.b", Role.SALES_EXECUTIVE)
+        User.objects.filter(username="rahul.b").update(first_name="Rahul", last_name="Tyagi")
+
+    def test_a_shared_first_name_is_left_for_the_human(self):
+        """Two Rahuls and no surname spoken: we do not know which one."""
+        self.two_rahuls()
+        res = self.draft("Rahul ko bolo", {"title": "T", "assignee": "Rahul"})
+        self.assertIsNone(res.data["assigned_to"])
+        self.assertEqual(res.data["assignee_heard"], "Rahul")
+
+    def test_the_surname_settles_it(self):
+        self.two_rahuls()
+        res = self.draft("Rahul Tyagi ko bolo", {"title": "T", "assignee": "Rahul Tyagi"})
+        self.assertEqual(res.data["assigned_to"], User.objects.get(username="rahul.b").id)
+
+    def test_two_people_with_the_identical_name_match_neither(self):
+        from accounts.models import Role
+        for u in ("twin.a", "twin.b"):
+            make(u, Role.SALES_EXECUTIVE)
+            User.objects.filter(username=u).update(first_name="Amit", last_name="Kumar")
+        res = self.draft("Amit Kumar ko bolo", {"title": "T", "assignee": "Amit Kumar"})
+        self.assertIsNone(res.data["assigned_to"])
+
+    def test_nothing_is_created(self):
+        before = Task.objects.count()
+        self.draft("koi task banao", {"title": "Something", "assignee": "rahul"})
+        self.assertEqual(Task.objects.count(), before)
+
+    # ---- refusals ----------------------------------------------------------
+    def test_no_audio_is_rejected(self):
+        self.as_(self.manager)
+        self.assertEqual(self.client.post(self.URL, {}, format="multipart").status_code, 400)
+
+    def test_a_huge_clip_is_rejected(self):
+        from unittest import mock
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.as_(self.manager)
+        big = SimpleUploadedFile("big.webm", b"x" * (11 * 1024 * 1024),
+                                 content_type="audio/webm")
+        with mock.patch("config.llm.can_transcribe", return_value=True):
+            res = self.client.post(self.URL, {"audio": big}, format="multipart")
+        self.assertEqual(res.status_code, 400)
+
+    def test_it_says_so_when_voice_is_not_configured(self):
+        from unittest import mock
+        self.as_(self.manager)
+        with mock.patch("config.llm.can_transcribe", return_value=False):
+            res = self.client.post(self.URL, {"audio": self.clip()}, format="multipart")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Type the task instead", str(res.data))
+
+    def test_unintelligible_audio_asks_for_another_go(self):
+        from unittest import mock
+        self.as_(self.manager)
+        with mock.patch("config.llm.can_transcribe", return_value=True), \
+             mock.patch("config.llm.transcribe", return_value=None):
+            res = self.client.post(self.URL, {"audio": self.clip()}, format="multipart")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("quieter", str(res.data))
